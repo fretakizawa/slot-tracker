@@ -60,6 +60,14 @@ table.dt th:first-child,table.dt td:first-child{text-align:left}
 .note{font-size:11px;color:var(--sub);line-height:1.6}
 .codebox{background:#111318;border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:10px;word-break:break-all;max-height:130px;overflow:auto;color:#c8cdd8}
 .gCol{color:var(--good)} .bCol{color:var(--bad)}
+tr.hot td{background:rgba(79,209,139,.08)}
+table.mx{border-collapse:collapse;font-size:10px}
+table.mx th,table.mx td{padding:4px 5px;text-align:center;border:1px solid #262a33;font-family:var(--mono);white-space:nowrap}
+table.mx th{color:var(--sub);font-weight:500;background:var(--panel)}
+table.mx th.dcol,table.mx td.dcol{position:sticky;left:0;background:var(--panel);z-index:2;color:var(--sub)}
+table.mx td.hotc{color:var(--good);font-weight:700;background:rgba(79,209,139,.12)}
+table.mx td.dot{color:#4a505c}
+.star56{color:var(--good);font-weight:700;margin-left:3px}
 ol.steps{padding-left:18px;font-size:12px;color:var(--text);line-height:1.9}
 .previewWrap{border:1px dashed var(--accent-dim);border-radius:8px;padding:8px;margin-top:10px}
 .mut{color:var(--sub)}
@@ -104,6 +112,32 @@ function parseBookmarkletJSON(obj){
   const pageDate=(obj.date&&/^\d{4}-\d{2}-\d{2}$/.test(obj.date))?obj.date:null;
   let model=null;
   if(obj.title){ const m=obj.title.split(/[|｜\-–【】]/).map(x=>x.trim()).filter(Boolean)[0]; if(m&&m.length<=30&&!/大当|データ|情報/.test(m)) model=m; }
+
+  // --- P's CUBE 台別詳細: 転置表 (行=BONUS/BIG/REG/合成確率..., 列=本日/N日前) ---
+  for(const t of tables){
+    const labels=t.map(r=>(r[0]||"").trim());
+    if(!(labels.includes("BIG")&&labels.includes("REG"))) continue;
+    const hIdx=t.findIndex(r=>r.some(c=>/本日|日前/.test(c)));
+    if(hIdx<0) continue;
+    if(!pageDate) throw "ページから日付を取得できませんでした";
+    const dai=obj.dai?parseInt(obj.dai):null;
+    if(!dai) throw "台番号を取得できませんでした。ブックマークレットを最新版に更新してください";
+    const header=t[hIdx];
+    const offs=header.map(h=>{ if(/本日/.test(h)) return 0; const m=h.match(/(\d+)\s*日前/); return m?parseInt(m[1]):null; });
+    const rowOf=re=>t.find(r=>re.test((r[0]||"").trim()));
+    const rBonus=rowOf(/^BONUS$/), rBig=rowOf(/^BIG$/), rReg=rowOf(/^REG$/), rGousei=rowOf(/合成/), rMax=rowOf(/最大放出|最大持/);
+    const rows=[];
+    offs.forEach((off,j)=>{
+      if(off==null) return;
+      const bb=rBig?num(rBig[j]):null, rb=rReg?num(rReg[j]):null;
+      const bonus=rBonus?num(rBonus[j]):null, gousei=rGousei?num(rGousei[j]):null;
+      const maxDama=rMax?num(rMax[j]):null;
+      if(bb==null&&rb==null&&bonus==null) return;
+      const start=(gousei&&((bb||0)+(rb||0))>0)?Math.round(gousei*((bb||0)+(rb||0))):null;
+      rows.push({dai,date:addDays(pageDate,-off),bb,rb,bonus,gousei,maxDama,start,model});
+    });
+    if(rows.length) return {rows,date:pageDate,model,url:obj.url||null,fmt:"pscube-detail"};
+  }
 
   // --- P's CUBE style: header has 本日 / N日前 (BONUS) ---
   for(const t of tables){
@@ -171,9 +205,14 @@ function parseInput(text){
 }
 
 /* ---------- bookmarklet source ---------- */
-const BM_SRC = `javascript:(function(){function x(e){return(e.innerText||'').trim().replace(/\\s+/g,' ');}var T=[].slice.call(document.querySelectorAll('table')).map(function(t){return [].slice.call(t.rows).map(function(r){return [].slice.call(r.cells).map(x);});}).filter(function(r){return r.length>1;});var has=T.some(function(t){return t.length>2&&t.some(function(r){return r.some(function(c){return /^\\d{2,4}$/.test(c);});});});if(!has){var f=[].slice.call(document.querySelectorAll('iframe')).map(function(i){return i.src;}).filter(function(s){return s&&s.indexOf('http')===0&&s.indexOf('dmm.com')<0;});if(f.length){if(confirm('台データの表が見つかりません。埋め込みデータページへ移動しますか？（移動後にもう一度実行してください）')){location.href=f[0];}return;}alert('台データの表が見つかりません。リスト表示/DATA表示のページでお試しください');return;}var d=(document.body.innerText.match(/\\d{4}[-\\/]\\d{2}[-\\/]\\d{2}/)||[''])[0].replace(/\\//g,'-');var s=JSON.stringify({date:d,url:location.href,title:document.title,tables:T});function fb(){var a=document.createElement('textarea');a.value=s;a.style.cssText='position:fixed;top:8%;left:4%;width:92%;height:55%;z-index:999999;background:white;color:black;border:3px solid rgb(255,138,42);border-radius:8px;padding:8px;font-size:11px';document.body.appendChild(a);a.focus();a.select();alert('全選択済みです。コピーして記録アプリに貼り付けてください');}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(function(){alert('台データをコピーしました。記録アプリに貼り付けてください');},fb);}else{fb();}})();`;
+const BM_SRC = `javascript:(function(){function x(e){return(e.innerText||'').trim().replace(/\\s+/g,' ');}var T=[].slice.call(document.querySelectorAll('table')).map(function(t){return [].slice.call(t.rows).map(function(r){return [].slice.call(r.cells).map(x);});}).filter(function(r){return r.length>1;});var has=T.some(function(t){return t.length>2&&t.some(function(r){return r.some(function(c){return /^\\d{2,4}$/.test(c);});});});if(!has){var f=[].slice.call(document.querySelectorAll('iframe')).map(function(i){return i.src;}).filter(function(s){return s&&s.indexOf('http')===0&&s.indexOf('dmm.com')<0;});if(f.length){if(confirm('台データの表が見つかりません。埋め込みデータページへ移動しますか？（移動後にもう一度実行してください）')){location.href=f[0];}return;}alert('台データの表が見つかりません。リスト表示/DATA表示のページでお試しください');return;}var d=(document.body.innerText.match(/\\d{4}[-\\/]\\d{2}[-\\/]\\d{2}/)||[''])[0].replace(/\\//g,'-');var dn=(document.body.innerText.match(/台番号\\s*([0-9]{2,4})/)||['',''])[1];var s=JSON.stringify({date:d,dai:dn,url:location.href,title:document.title,tables:T});function fb(){var a=document.createElement('textarea');a.value=s;a.style.cssText='position:fixed;top:8%;left:4%;width:92%;height:55%;z-index:999999;background:white;color:black;border:3px solid rgb(255,138,42);border-radius:8px;padding:8px;font-size:11px';document.body.appendChild(a);a.focus();a.select();alert('全選択済みです。コピーして記録アプリに貼り付けてください');}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(function(){alert('台データをコピーしました。記録アプリに貼り付けてください');},fb);}else{fb();}})();`;
 
 /* ---------- derived helpers ---------- */
+function hotCheck(r,thRbP,minStart,thRbCnt){
+  if(r.rbP!=null&&(r.start||0)>=minStart&&r.rbP<=thRbP) return "prob";   // バケ確率基準
+  if((r.start==null||r.start===0)&&r.rb!=null&&r.rb>=thRbCnt) return "count"; // 回転数なし店: RB回数基準
+  return null;
+}
 function withDerived(r){
   const total=(r.bb!=null||r.rb!=null)?(r.bb||0)+(r.rb||0):(r.bonus!=null?r.bonus:0);
   const gousei = r.gousei!=null ? r.gousei : (r.start&&total? r.start/total : null);
@@ -380,7 +419,8 @@ function ListPage({db,setDb,stores,models}){
   const [sort,setSort]=useState({k:"dai",asc:true});
   const recs=db.records.filter(r=>(!f.store||r.store===f.store)&&(!f.model||r.model===f.model)&&(!f.date||r.date===f.date)).map(withDerived);
   const dates=[...new Set(db.records.filter(r=>(!f.store||r.store===f.store)&&(!f.model||r.model===f.model)).map(r=>r.date))].sort().reverse();
-  const sorted=[...recs].sort((a,b)=>{const va=a[sort.k]??-1,vb=b[sort.k]??-1;return sort.asc?va-vb:vb-va;});
+  const sorted=[...recs].sort((a,b)=>{const va=a[sort.k],vb=b[sort.k];if(va==null&&vb==null)return 0;if(va==null)return 1;if(vb==null)return -1;return sort.asc?va-vb:vb-va;});
+  const isHot=r=>hotCheck(r,250,1000,30)!=null;
   const th=(k,l)=><th onClick={()=>setSort(s=>({k,asc:s.k===k?!s.asc:true}))} style={{cursor:"pointer",color:sort.k===k?"var(--accent)":undefined}}>{l}{sort.k===k?(sort.asc?"▲":"▼"):""}</th>;
   const delDay=()=>{
     if(!f.date||!confirm(`${f.date} の表示中データ ${recs.length}件を削除しますか?`)) return;
@@ -392,11 +432,12 @@ function ListPage({db,setDb,stores,models}){
       <div className="card">
         <h2>台一覧 <span className="mut">({sorted.length}台)</span></h2>
         <div className="scrollx"><table className="dt">
-          <thead><tr>{th("dai","台番号")}{f.date?null:<th>日付</th>}{th("start","累計S")}{th("bb","BB")}{th("rb","RB")}{th("total","当り計")}{th("gouseiD","合成")}{th("maxDama","最大持玉")}</tr></thead>
+          <thead><tr>{th("dai","台番号")}{f.date?null:<th>日付</th>}{th("start","累計S")}{th("bb","BB")}{th("rb","RB")}{th("total","当り計")}{th("rbP","バケ確率")}{th("gouseiD","合成")}{th("maxDama","最大持玉")}</tr></thead>
           <tbody>{sorted.map((r,i)=>(
-            <tr key={i}><td><span className="daichip">{r.dai}</span></td>{f.date?null:<td className="mut">{r.date.slice(5)}</td>}<td>{fmt(r.start)}</td><td style={{color:"var(--bb)"}}>{fmt(r.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(r.rb)}</td><td>{fmt(r.total)}</td><td>{r.gouseiD?"1/"+fmt(r.gouseiD,1):"–"}</td><td>{fmt(r.maxDama)}</td></tr>
+            <tr key={i} className={isHot(r)?"hot":""}><td><span className="daichip">{r.dai}</span>{isHot(r)&&<span className="star56">★</span>}</td>{f.date?null:<td className="mut">{r.date.slice(5)}</td>}<td>{fmt(r.start)}</td><td style={{color:"var(--bb)"}}>{fmt(r.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(r.rb)}</td><td>{fmt(r.total)}</td><td style={isHot(r)?{color:"var(--good)",fontWeight:700}:null}>{r.rbP?"1/"+fmt(r.rbP,1):"–"}</td><td>{r.gouseiD?"1/"+fmt(r.gouseiD,1):"–"}</td><td>{fmt(r.maxDama)}</td></tr>
           ))}</tbody>
         </table></div>
+        <div className="note" style={{marginTop:6}}>★ = バケ確率1/250以内(累計1,000G以上)、または回転数非公開の店はRB30回以上(設定5・6候補の目安)</div>
         {f.date&&sorted.length>0&&<div style={{marginTop:10}}><button className="btn danger small" onClick={delDay}>この日のデータを削除</button></div>}
       </div>
     </div>
@@ -441,14 +482,27 @@ function DaiPage({db,stores,models}){
 /* ---------- aggregate ---------- */
 function AggPage({db,stores,models}){
   const [f,setF]=useState({store:"",model:"",date:""});
+  const [th56,setTh56]=useState("250");
+  const [minS,setMinS]=useState("1000");
+  const [thRb,setThRb]=useState("30");
   const pool=db.records.filter(r=>(!f.store||r.store===f.store)&&(!f.model||r.model===f.model)).map(withDerived);
+  const thV=parseFloat(th56)||250, minV=parseFloat(minS)||0, rbV=parseFloat(thRb)||30;
+  const isHotR=r=>hotCheck(r,thV,minV,rbV)!=null;
+  const cands=pool.filter(isHotR).sort((a,b)=>{
+    if(a.rbP!=null&&b.rbP!=null) return a.rbP-b.rbP;
+    if(a.rbP!=null) return -1; if(b.rbP!=null) return 1;
+    return (b.rb||0)-(a.rb||0);
+  }).slice(0,50);
+  const mxDais=[...new Set(pool.map(r=>r.dai))].sort((a,b)=>a-b);
+  const mxDates=[...new Set(pool.map(r=>r.date))].sort();
+  const mxCell={}; pool.forEach(r=>{mxCell[r.date+"|"+r.dai]=r;});
   // by date
   const byDate={};
   pool.forEach(r=>{ (byDate[r.date]=byDate[r.date]||[]).push(r); });
   const dateRows=Object.keys(byDate).sort().map(d=>{
     const rs=byDate[d];
     const S=rs.reduce((a,r)=>a+(r.start||0),0), B=rs.reduce((a,r)=>a+(r.bb||0),0), R=rs.reduce((a,r)=>a+(r.rb||0),0), T=rs.reduce((a,r)=>a+(r.total||0),0);
-    return {date:d,n:rs.length,S,B,R,T,g:S&&T?S/T:null};
+    return {date:d,n:rs.length,S,B,R,T,g:S&&T?S/T:null,rbG:S&&R?S/R:null,hot:rs.filter(r=>hotCheck(r,thV,minV,rbV)!=null).length};
   });
   // by 末尾
   const byTail={};
@@ -475,11 +529,50 @@ function AggPage({db,stores,models}){
         <h2>日別推移（機種平均合成確率）</h2>
         <LineChart data={dateRows.map(d=>({x:d.date,y:d.g}))} yLabel="合成確率 1/x" invertGood/>
         <div className="scrollx" style={{marginTop:6}}><table className="dt">
-          <thead><tr><th>日付</th><th>台数</th><th>総S</th><th>BB</th><th>RB</th><th>合成</th></tr></thead>
+          <thead><tr><th>日付</th><th>台数</th><th>総S</th><th>BB</th><th>RB</th><th>バケ確率</th><th>合成</th><th>★候補</th></tr></thead>
           <tbody>{dateRows.map((d,i)=>(
-            <tr key={i}><td>{d.date.slice(5)}</td><td>{d.n}</td><td>{fmt(d.S)}</td><td style={{color:"var(--bb)"}}>{fmt(d.B)}</td><td style={{color:"var(--rb)"}}>{fmt(d.R)}</td><td>{d.g?"1/"+fmt(d.g,1):"–"}</td></tr>
+            <tr key={i}><td>{d.date.slice(5)}</td><td>{d.n}</td><td>{fmt(d.S)}</td><td style={{color:"var(--bb)"}}>{fmt(d.B)}</td><td style={{color:"var(--rb)"}}>{fmt(d.R)}</td><td>{d.rbG?"1/"+fmt(d.rbG,1):"–"}</td><td>{d.g?"1/"+fmt(d.g,1):"–"}</td><td style={{color:"var(--good)"}}>{d.hot||0}</td></tr>
           ))}</tbody>
         </table></div>
+      </div>
+      <div className="card">
+        <h2>設定5・6候補（バケ確率チェック）</h2>
+        <div className="row2">
+          <div><label className="fl">バケ確率 1/x 以内</label>
+            <input type="text" inputMode="numeric" value={th56} onChange={e=>setTh56(e.target.value)}/></div>
+          <div><label className="fl">最低累計スタート</label>
+            <input type="text" inputMode="numeric" value={minS} onChange={e=>setMinS(e.target.value)}/></div>
+          <div><label className="fl">RB回数(回転数なし店)</label>
+            <input type="text" inputMode="numeric" value={thRb} onChange={e=>setThRb(e.target.value)}/></div>
+        </div>
+        <div className="scrollx" style={{marginTop:8}}><table className="dt">
+          <thead><tr><th>台番号</th><th>日付</th><th>店舗</th><th>累計S</th><th>RB</th><th>バケ確率</th><th>合成</th></tr></thead>
+          <tbody>{cands.map((r,i)=>(
+            <tr key={i} className="hot"><td><span className="daichip">{r.dai}</span><span className="star56">★</span></td><td className="mut">{r.date.slice(5)}</td><td className="mut">{r.store}</td><td>{fmt(r.start)}</td><td style={{color:"var(--rb)",fontWeight:r.rbP==null?700:400}}>{fmt(r.rb)}</td><td style={{color:"var(--good)",fontWeight:700}}>{r.rbP!=null?"1/"+fmt(r.rbP,1):"RB"+fmt(r.rb)+"回"}</td><td>{r.gouseiD?"1/"+fmt(r.gouseiD,1):"–"}</td></tr>
+          ))}</tbody>
+        </table></div>
+        {!cands.length&&<div className="note">条件を満たす台はありません</div>}
+        <div className="note" style={{marginTop:6}}>判定は2系統: ①バケ確率(累計S÷RB)がしきい値以内(回転数公開店)、②回転数非公開の店(ベルシティ等)はRB回数がしきい値以上。①をバケ確率順→②をRB回数順に表示。マイジャグVの理論値: 設定6=1/229、設定5=1/255、設定1=1/378。</div>
+      </div>
+      <div className="card">
+        <h2>★カレンダー（日付 × 台番号）</h2>
+        {!f.store?<div className="note">店舗（と必要なら機種）を選択すると表示されます。台番号は店舗内でのみ一意のためです。</div>:(
+          <React.Fragment>
+            <div className="scrollx"><table className="mx">
+              <thead><tr><th className="dcol">日付</th>{mxDais.map(d=><th key={d}>{d}</th>)}</tr></thead>
+              <tbody>{mxDates.map(dt=>(
+                <tr key={dt}><td className="dcol">{dt.slice(5)}</td>{mxDais.map(d=>{
+                  const r=mxCell[dt+"|"+d];
+                  if(!r) return <td key={d}></td>;
+                  const hot=isHotR(r);
+                  const tip=`台${d} ${dt}  RB:${r.rb!=null?r.rb:"-"} ${r.rbP?"バケ1/"+r.rbP.toFixed(1):""} S:${r.start!=null?r.start:"-"}`;
+                  return <td key={d} className={hot?"hotc":"dot"} title={tip}>{hot?"★":"·"}</td>;
+                })}</tr>
+              ))}</tbody>
+            </table></div>
+            <div className="note" style={{marginTop:6}}>★＝バケ確率1/{th56}以内(累計{minS}G以上)、回転数なしの店はRB{thRb}回以上　·＝データあり(基準外)　空欄＝データなし。しきい値は上の「設定5・6候補」欄と連動。横スクロールで全台確認できます。</div>
+          </React.Fragment>
+        )}
       </div>
       <div className="card">
         <h2>末尾別集計</h2>

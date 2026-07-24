@@ -97,10 +97,42 @@ function mapHeader(cells){
     return null;
   });
 }
+function addDays(iso,delta){ const d=new Date(iso+"T00:00:00"); d.setDate(d.getDate()+delta); return d.toISOString().slice(0,10); }
 function parseBookmarkletJSON(obj){
   const tables=(obj.tables||[]).filter(t=>t.length>1);
   if(!tables.length) throw "テーブルが見つかりません";
-  // pick table whose header matches best & has most rows
+  const pageDate=(obj.date&&/^\d{4}-\d{2}-\d{2}$/.test(obj.date))?obj.date:null;
+  let model=null;
+  if(obj.title){ const m=obj.title.split(/[|｜\-–【】]/).map(x=>x.trim()).filter(Boolean)[0]; if(m&&m.length<=30&&!/大当|データ|情報/.test(m)) model=m; }
+
+  // --- P's CUBE style: header has 本日 / N日前 (BONUS) ---
+  for(const t of tables){
+    const hIdx=t.findIndex(r=>r.some(c=>/本日/.test(c))&&r.some(c=>/日前/.test(c)));
+    if(hIdx<0) continue;
+    const header=t[hIdx];
+    const offs=header.map(h=>{ if(/本日/.test(h)) return 0; const m=h.match(/(\d+)\s*日前/); return m?parseInt(m[1]):null; });
+    if(!pageDate) throw "ページから日付を取得できませんでした";
+    const rows=[]; let curModel=model;
+    for(let i=0;i<t.length;i++){
+      if(i===hIdx) continue;
+      const r=t[i];
+      const joined=r.filter(Boolean).join(" ");
+      const daiCell=r.find(c=>/^\d{2,4}$/.test(c));
+      if(!daiCell){
+        if(joined&&joined.length<=30&&!/本日|日前|台番|クリック|検索/.test(joined)) curModel=joined;
+        continue;
+      }
+      const dai=parseInt(daiCell);
+      r.forEach((c,j)=>{
+        if(offs[j]==null) return;
+        const v=num(c); if(v==null) return;
+        rows.push({dai,bonus:v,date:addDays(pageDate,-offs[j]),model:curModel});
+      });
+    }
+    if(rows.length) return {rows,date:pageDate,model,url:obj.url||null,fmt:"pscube"};
+  }
+
+  // --- DATA ONLINE style ---
   let best=null,bestScore=-1;
   for(const t of tables){
     let hIdx=t.findIndex(r=>r.some(c=>/台番/.test(c)));
@@ -117,11 +149,7 @@ function parseBookmarkletJSON(obj){
     if(rec.dai!=null) rows.push(rec);
   }
   if(!rows.length) throw "台データ行が見つかりません(リスト表示でお試しください)";
-  const date=(obj.date&&/^\d{4}-\d{2}-\d{2}$/.test(obj.date))?obj.date:null;
-  // guess model name from title e.g. "マイジャグラーV | ..." 
-  let model=null;
-  if(obj.title){ const m=obj.title.split(/[|｜\-–]/)[0].trim(); if(m&&m.length<=30) model=m; }
-  return {rows,date,model,url:obj.url||null};
+  return {rows,date:pageDate,model,url:obj.url||null,fmt:"dataonline"};
 }
 function parsePlainText(text){
   // fallback: lines of numbers, first = 台番号 (3-4 digits)
@@ -143,11 +171,11 @@ function parseInput(text){
 }
 
 /* ---------- bookmarklet source ---------- */
-const BM_SRC = `javascript:(function(){function x(e){return(e.innerText||'').trim().replace(/\\s+/g,' ');}var T=[].slice.call(document.querySelectorAll('table')).map(function(t){return [].slice.call(t.rows).map(function(r){return [].slice.call(r.cells).map(x);});}).filter(function(r){return r.length>1;});var d=(document.body.innerText.match(/\\d{4}-\\d{2}-\\d{2}/)||[''])[0];var s=JSON.stringify({date:d,url:location.href,title:document.title,tables:T});function fb(){var a=document.createElement('textarea');a.value=s;a.style.cssText='position:fixed;top:8%;left:4%;width:92%;height:55%;z-index:999999;background:white;color:black;border:3px solid rgb(255,138,42);border-radius:8px;padding:8px;font-size:11px';document.body.appendChild(a);a.focus();a.select();alert('全選択済みです。コピーして記録アプリに貼り付けてください（閉じるには再読込）');}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(function(){alert('台データをコピーしました。記録アプリに貼り付けてください（'+(T[0]?T.map(function(t){return t.length-1}).join('/')+'行':'0行')+'）');},fb);}else{fb();}})();`;
+const BM_SRC = `javascript:(function(){function x(e){return(e.innerText||'').trim().replace(/\\s+/g,' ');}var T=[].slice.call(document.querySelectorAll('table')).map(function(t){return [].slice.call(t.rows).map(function(r){return [].slice.call(r.cells).map(x);});}).filter(function(r){return r.length>1;});var has=T.some(function(t){return t.length>2&&t.some(function(r){return r.some(function(c){return /^\\d{2,4}$/.test(c);});});});if(!has){var f=[].slice.call(document.querySelectorAll('iframe')).map(function(i){return i.src;}).filter(function(s){return s&&s.indexOf('http')===0&&s.indexOf('dmm.com')<0;});if(f.length){if(confirm('台データの表が見つかりません。埋め込みデータページへ移動しますか？（移動後にもう一度実行してください）')){location.href=f[0];}return;}alert('台データの表が見つかりません。リスト表示/DATA表示のページでお試しください');return;}var d=(document.body.innerText.match(/\\d{4}[-\\/]\\d{2}[-\\/]\\d{2}/)||[''])[0].replace(/\\//g,'-');var s=JSON.stringify({date:d,url:location.href,title:document.title,tables:T});function fb(){var a=document.createElement('textarea');a.value=s;a.style.cssText='position:fixed;top:8%;left:4%;width:92%;height:55%;z-index:999999;background:white;color:black;border:3px solid rgb(255,138,42);border-radius:8px;padding:8px;font-size:11px';document.body.appendChild(a);a.focus();a.select();alert('全選択済みです。コピーして記録アプリに貼り付けてください');}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(function(){alert('台データをコピーしました。記録アプリに貼り付けてください');},fb);}else{fb();}})();`;
 
 /* ---------- derived helpers ---------- */
 function withDerived(r){
-  const total=(r.bb||0)+(r.rb||0);
+  const total=(r.bb!=null||r.rb!=null)?(r.bb||0)+(r.rb||0):(r.bonus!=null?r.bonus:0);
   const gousei = r.gousei!=null ? r.gousei : (r.start&&total? r.start/total : null);
   const bbP = r.start&&r.bb? r.start/r.bb : null;
   const rbP = r.start&&r.rb? r.start/r.rb : null;
@@ -271,8 +299,9 @@ function ImportPage({stores,models,onSave,setMsg,msg}){
     }catch(e){ setPreview(null); setMsg({t:"err",s:"解析エラー: "+e}); }
   };
   const save=()=>{
-    if(!store.trim()||!model.trim()){ setMsg({t:"err",s:"店舗名と機種名を入力してください"}); return; }
-    const recs=preview.map(r=>({...r,store:store.trim(),model:model.trim(),date}));
+    const needModel=preview.some(r=>!r.model);
+    if(!store.trim()||(needModel&&!model.trim())){ setMsg({t:"err",s:"店舗名と機種名を入力してください"}); return; }
+    const recs=preview.map(r=>({...r,store:store.trim(),model:(r.model||model).trim(),date:r.date||date}));
     onSave(recs);
     localStorage.setItem("st_lastStore",store.trim());
     setMsg({t:"ok",s:`${recs.length}台分を保存しました（同一店舗・機種・日付・台番号は上書き）`});
@@ -318,9 +347,9 @@ function ImportPage({stores,models,onSave,setMsg,msg}){
           <div className="previewWrap">
             <div className="note" style={{marginBottom:6}}>プレビュー（先頭5台 / 全{preview.length}台）</div>
             <div className="scrollx"><table className="dt">
-              <thead><tr><th>台番号</th><th>累計S</th><th>BB</th><th>RB</th><th>合成</th><th>最大持玉</th></tr></thead>
+              <thead><tr><th>台番号</th><th>日付</th><th>累計S</th><th>BB</th><th>RB</th><th>当り計</th><th>合成</th></tr></thead>
               <tbody>{preview.slice(0,5).map((r,i)=>{const d=withDerived(r);return(
-                <tr key={i}><td><span className="daichip">{r.dai}</span></td><td>{fmt(r.start)}</td><td style={{color:"var(--bb)"}}>{fmt(r.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(r.rb)}</td><td>{d.gouseiD?("1/"+fmt(d.gouseiD,1)):"–"}</td><td>{fmt(r.maxDama)}</td></tr>
+                <tr key={i}><td><span className="daichip">{r.dai}</span></td><td className="mut">{(r.date||date).slice(5)}</td><td>{fmt(r.start)}</td><td style={{color:"var(--bb)"}}>{fmt(r.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(r.rb)}</td><td>{fmt(d.total)}</td><td>{d.gouseiD?("1/"+fmt(d.gouseiD,1)):"–"}</td></tr>
               );})}</tbody>
             </table></div>
             <div style={{marginTop:10}}><button className="btn" onClick={save}>この内容で保存</button></div>
@@ -363,9 +392,9 @@ function ListPage({db,setDb,stores,models}){
       <div className="card">
         <h2>台一覧 <span className="mut">({sorted.length}台)</span></h2>
         <div className="scrollx"><table className="dt">
-          <thead><tr>{th("dai","台番号")}{f.date?null:<th>日付</th>}{th("start","累計S")}{th("bb","BB")}{th("rb","RB")}{th("gouseiD","合成")}{th("maxDama","最大持玉")}</tr></thead>
+          <thead><tr>{th("dai","台番号")}{f.date?null:<th>日付</th>}{th("start","累計S")}{th("bb","BB")}{th("rb","RB")}{th("total","当り計")}{th("gouseiD","合成")}{th("maxDama","最大持玉")}</tr></thead>
           <tbody>{sorted.map((r,i)=>(
-            <tr key={i}><td><span className="daichip">{r.dai}</span></td>{f.date?null:<td className="mut">{r.date.slice(5)}</td>}<td>{fmt(r.start)}</td><td style={{color:"var(--bb)"}}>{fmt(r.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(r.rb)}</td><td>{r.gouseiD?"1/"+fmt(r.gouseiD,1):"–"}</td><td>{fmt(r.maxDama)}</td></tr>
+            <tr key={i}><td><span className="daichip">{r.dai}</span></td>{f.date?null:<td className="mut">{r.date.slice(5)}</td>}<td>{fmt(r.start)}</td><td style={{color:"var(--bb)"}}>{fmt(r.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(r.rb)}</td><td>{fmt(r.total)}</td><td>{r.gouseiD?"1/"+fmt(r.gouseiD,1):"–"}</td><td>{fmt(r.maxDama)}</td></tr>
           ))}</tbody>
         </table></div>
         {f.date&&sorted.length>0&&<div style={{marginTop:10}}><button className="btn danger small" onClick={delDay}>この日のデータを削除</button></div>}
@@ -392,8 +421,8 @@ function DaiPage({db,stores,models}){
       {dai&&hist.length>0&&(
         <div className="card">
           <h2>台 {dai} の履歴 <span className="mut">({hist.length}日分)</span></h2>
-          <div className="legend"><span><i style={{background:"var(--bb)"}}/>BB</span><span><i style={{background:"var(--rb)"}}/>RB</span></div>
-          <StackBars data={hist.map(h=>({x:h.date,bb:h.bb,rb:h.rb}))}/>
+          <div className="legend"><span><i style={{background:"var(--bb)"}}/>BB(BB/RB区別なしの店は当り計)</span><span><i style={{background:"var(--rb)"}}/>RB</span></div>
+          <StackBars data={hist.map(h=>({x:h.date,bb:h.bb!=null?h.bb:h.bonus,rb:h.rb}))}/>
           <div style={{marginTop:10}}>
             <LineChart data={hist.map(h=>({x:h.date,y:h.gouseiD}))} yLabel="合成確率 1/x" invertGood/>
           </div>
@@ -418,18 +447,18 @@ function AggPage({db,stores,models}){
   pool.forEach(r=>{ (byDate[r.date]=byDate[r.date]||[]).push(r); });
   const dateRows=Object.keys(byDate).sort().map(d=>{
     const rs=byDate[d];
-    const S=rs.reduce((a,r)=>a+(r.start||0),0), B=rs.reduce((a,r)=>a+(r.bb||0),0), R=rs.reduce((a,r)=>a+(r.rb||0),0);
-    return {date:d,n:rs.length,S,B,R,g:B+R?S/(B+R):null};
+    const S=rs.reduce((a,r)=>a+(r.start||0),0), B=rs.reduce((a,r)=>a+(r.bb||0),0), R=rs.reduce((a,r)=>a+(r.rb||0),0), T=rs.reduce((a,r)=>a+(r.total||0),0);
+    return {date:d,n:rs.length,S,B,R,T,g:S&&T?S/T:null};
   });
   // by 末尾
   const byTail={};
   pool.forEach(r=>{ const t=r.dai%10; (byTail[t]=byTail[t]||[]).push(r); });
   const tailRows=Object.keys(byTail).map(Number).sort((a,b)=>a-b).map(t=>{
     const rs=byTail[t];
-    const S=rs.reduce((a,r)=>a+(r.start||0),0), B=rs.reduce((a,r)=>a+(r.bb||0),0), R=rs.reduce((a,r)=>a+(r.rb||0),0);
-    return {t,n:rs.length,g:B+R?S/(B+R):null,avgT:rs.length?(B+R)/rs.length:null};
+    const S=rs.reduce((a,r)=>a+(r.start||0),0), T=rs.reduce((a,r)=>a+(r.total||0),0);
+    return {t,n:rs.length,g:S&&T?S/T:null,avgT:rs.length?T/rs.length:null};
   });
-  const allS=pool.reduce((a,r)=>a+(r.start||0),0), allB=pool.reduce((a,r)=>a+(r.bb||0),0), allR=pool.reduce((a,r)=>a+(r.rb||0),0);
+  const allS=pool.reduce((a,r)=>a+(r.start||0),0), allB=pool.reduce((a,r)=>a+(r.bb||0),0), allR=pool.reduce((a,r)=>a+(r.rb||0),0), allT=pool.reduce((a,r)=>a+(r.total||0),0);
   return (
     <div className="page">
       <Filters stores={stores} models={models} f={f} setF={setF}/>
@@ -440,7 +469,7 @@ function AggPage({db,stores,models}){
           <div className="stat"><div className="v" style={{color:"var(--bb)"}}>{fmt(allB)}</div><div className="k">総BB</div></div>
           <div className="stat"><div className="v" style={{color:"var(--rb)"}}>{fmt(allR)}</div><div className="k">総RB</div></div>
         </div>
-        <div className="note">全体合成確率: <b style={{color:"var(--text)"}}>{allB+allR?"1/"+fmt(allS/(allB+allR),1):"–"}</b></div>
+        <div className="note">全体合成確率: <b style={{color:"var(--text)"}}>{allS&&allT?"1/"+fmt(allS/allT,1):"–"}</b>　総当り: <b style={{color:"var(--text)"}}>{fmt(allT)}</b></div>
       </div>
       <div className="card">
         <h2>日別推移（機種平均合成確率）</h2>
@@ -470,7 +499,7 @@ function AggPage({db,stores,models}){
 function ToolPage({db,setDb}){
   const fileRef=useRef();
   const exportCSV=()=>{
-    const head=["store","model","date","dai","start","bb","rb","gousei","maxDama","prevStart"];
+    const head=["store","model","date","dai","start","bb","rb","bonus","gousei","maxDama","prevStart"];
     const lines=[head.join(",")].concat(db.records.map(r=>head.map(k=>r[k]??"").join(",")));
     const blob=new Blob(["\uFEFF"+lines.join("\n")],{type:"text/csv"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="slot_data.csv";a.click();

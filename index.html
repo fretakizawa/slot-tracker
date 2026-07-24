@@ -90,7 +90,7 @@ const fmt = (v,d=0) => v==null?"–":v.toLocaleString(undefined,{minimumFraction
 /* ---------- parser ---------- */
 const COLMAP = [
   {key:"dai",   re:/台番号|台番/},
-  {key:"start", re:/累計スタート|累計/},
+  {key:"start", re:/累計スタート|累計|総回転|総ゲーム|総スタート/},
   {key:"bb",    re:/BB/i},
   {key:"rb",    re:/RB/i},
   {key:"gousei",re:/合成/},
@@ -215,10 +215,12 @@ function hotCheck(r,thRbP,minStart,thRbCnt){
 }
 function withDerived(r){
   const total=(r.bb!=null||r.rb!=null)?(r.bb||0)+(r.rb||0):(r.bonus!=null?r.bonus:0);
-  const gousei = r.gousei!=null ? r.gousei : (r.start&&total? r.start/total : null);
-  const bbP = r.start&&r.bb? r.start/r.bb : null;
-  const rbP = r.start&&r.rb? r.start/r.rb : null;
-  return {...r,total,gouseiD:gousei,bbP,rbP};
+  let start=r.start, startEst=false;
+  if((start==null||start===0)&&r.gousei&&total>0){ start=Math.round(r.gousei*total); startEst=true; }
+  const gousei = r.gousei!=null ? r.gousei : (start&&total? start/total : null);
+  const bbP = start&&r.bb? start/r.bb : null;
+  const rbP = start&&r.rb? start/r.rb : null;
+  return {...r,total,start,startEst,gouseiD:gousei,bbP,rbP};
 }
 
 /* ---------- SVG charts ---------- */
@@ -434,7 +436,7 @@ function ListPage({db,setDb,stores,models}){
         <div className="scrollx"><table className="dt">
           <thead><tr>{th("dai","台番号")}{f.date?null:<th>日付</th>}{th("start","累計S")}{th("bb","BB")}{th("rb","RB")}{th("total","当り計")}{th("rbP","バケ確率")}{th("gouseiD","合成")}{th("maxDama","最大持玉")}</tr></thead>
           <tbody>{sorted.map((r,i)=>(
-            <tr key={i} className={isHot(r)?"hot":""}><td><span className="daichip">{r.dai}</span>{isHot(r)&&<span className="star56">★</span>}</td>{f.date?null:<td className="mut">{r.date.slice(5)}</td>}<td>{fmt(r.start)}</td><td style={{color:"var(--bb)"}}>{fmt(r.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(r.rb)}</td><td>{fmt(r.total)}</td><td style={isHot(r)?{color:"var(--good)",fontWeight:700}:null}>{r.rbP?"1/"+fmt(r.rbP,1):"–"}</td><td>{r.gouseiD?"1/"+fmt(r.gouseiD,1):"–"}</td><td>{fmt(r.maxDama)}</td></tr>
+            <tr key={i} className={isHot(r)?"hot":""}><td><span className="daichip">{r.dai}</span>{isHot(r)&&<span className="star56">★</span>}</td>{f.date?null:<td className="mut">{r.date.slice(5)}</td>}<td>{r.startEst&&<span className="mut">≈</span>}{fmt(r.start)}</td><td style={{color:"var(--bb)"}}>{fmt(r.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(r.rb)}</td><td>{fmt(r.total)}</td><td style={isHot(r)?{color:"var(--good)",fontWeight:700}:null}>{r.rbP?"1/"+fmt(r.rbP,1):"–"}</td><td>{r.gouseiD?"1/"+fmt(r.gouseiD,1):"–"}</td><td>{fmt(r.maxDama)}</td></tr>
           ))}</tbody>
         </table></div>
         <div className="note" style={{marginTop:6}}>★ = バケ確率1/250以内(累計1,000G以上)、または回転数非公開の店はRB30回以上(設定5・6候補の目安)</div>
@@ -470,7 +472,7 @@ function DaiPage({db,stores,models}){
           <div className="scrollx" style={{marginTop:8}}><table className="dt">
             <thead><tr><th>日付</th><th>累計S</th><th>BB</th><th>RB</th><th>合成</th><th>BB確率</th><th>RB確率</th></tr></thead>
             <tbody>{hist.map((h,i)=>(
-              <tr key={i}><td>{h.date.slice(5)}</td><td>{fmt(h.start)}</td><td style={{color:"var(--bb)"}}>{fmt(h.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(h.rb)}</td><td>{h.gouseiD?"1/"+fmt(h.gouseiD,1):"–"}</td><td>{h.bbP?"1/"+fmt(h.bbP,1):"–"}</td><td>{h.rbP?"1/"+fmt(h.rbP,1):"–"}</td></tr>
+              <tr key={i}><td>{h.date.slice(5)}</td><td>{h.startEst&&<span className="mut">≈</span>}{fmt(h.start)}</td><td style={{color:"var(--bb)"}}>{fmt(h.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(h.rb)}</td><td>{h.gouseiD?"1/"+fmt(h.gouseiD,1):"–"}</td><td>{h.bbP?"1/"+fmt(h.bbP,1):"–"}</td><td>{h.rbP?"1/"+fmt(h.rbP,1):"–"}</td></tr>
             ))}</tbody>
           </table></div>
         </div>

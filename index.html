@@ -113,6 +113,30 @@ function parseBookmarkletJSON(obj){
   let model=null;
   if(obj.title){ const m=obj.title.split(/[|｜\-–【】]/).map(x=>x.trim()).filter(Boolean)[0]; if(m&&m.length<=30&&!/大当|データ|情報/.test(m)) model=m; }
 
+  // --- P's CUBE 台別詳細(直接アクセス版): 2列ラベル/値の表が日別に並ぶ ---
+  {
+    const isDayTable=t=>{
+      const two=t.filter(r=>r.length===2).length>=t.length-1;
+      const ls=t.map(r=>(r[0]||"").trim());
+      return two&&ls.includes("BIG")&&ls.includes("REG");
+    };
+    const dayTables=tables.filter(isDayTable);
+    if(dayTables.length){
+      if(!pageDate) throw "ページから日付を取得できませんでした";
+      const dai=obj.dai?parseInt(obj.dai):null;
+      if(!dai) throw "台番号を取得できませんでした。ブックマークレットを最新版に更新してください";
+      const rows=[];
+      dayTables.forEach((t,idx)=>{
+        const get=re=>{ const r=t.find(r=>re.test((r[0]||"").trim())); return r?num(r[1]):null; };
+        const bb=get(/^BIG$/), rb=get(/^REG$/), bonus=get(/^BONUS$/);
+        const gousei=get(/合成/), maxDama=get(/最大放出|最大持/);
+        if(bb==null&&rb==null&&bonus==null) return;
+        rows.push({dai,date:addDays(pageDate,-idx),bb,rb,bonus:(bonus!=null?bonus:((bb||0)+(rb||0))||null),gousei,maxDama,model});
+      });
+      if(rows.length) return {rows,date:pageDate,model,url:obj.url||null,fmt:"pscube-direct"};
+    }
+  }
+
   // --- P's CUBE 台別詳細: 転置表 (行=BONUS/BIG/REG/合成確率..., 列=本日/N日前) ---
   for(const t of tables){
     const labels=t.map(r=>(r[0]||"").trim());
@@ -422,7 +446,7 @@ function ListPage({db,setDb,stores,models}){
   const recs=db.records.filter(r=>(!f.store||r.store===f.store)&&(!f.model||r.model===f.model)&&(!f.date||r.date===f.date)).map(withDerived);
   const dates=[...new Set(db.records.filter(r=>(!f.store||r.store===f.store)&&(!f.model||r.model===f.model)).map(r=>r.date))].sort().reverse();
   const sorted=[...recs].sort((a,b)=>{const va=a[sort.k],vb=b[sort.k];if(va==null&&vb==null)return 0;if(va==null)return 1;if(vb==null)return -1;return sort.asc?va-vb:vb-va;});
-  const isHot=r=>hotCheck(r,250,1000,30)!=null;
+  const isHot=r=>hotCheck(r,250,2500,30)!=null;
   const th=(k,l)=><th onClick={()=>setSort(s=>({k,asc:s.k===k?!s.asc:true}))} style={{cursor:"pointer",color:sort.k===k?"var(--accent)":undefined}}>{l}{sort.k===k?(sort.asc?"▲":"▼"):""}</th>;
   const delDay=()=>{
     if(!f.date||!confirm(`${f.date} の表示中データ ${recs.length}件を削除しますか?`)) return;
@@ -439,7 +463,7 @@ function ListPage({db,setDb,stores,models}){
             <tr key={i} className={isHot(r)?"hot":""}><td><span className="daichip">{r.dai}</span>{isHot(r)&&<span className="star56">★</span>}</td>{f.date?null:<td className="mut">{r.date.slice(5)}</td>}<td>{r.startEst&&<span className="mut">≈</span>}{fmt(r.start)}</td><td style={{color:"var(--bb)"}}>{fmt(r.bb)}</td><td style={{color:"var(--rb)"}}>{fmt(r.rb)}</td><td>{fmt(r.total)}</td><td style={isHot(r)?{color:"var(--good)",fontWeight:700}:null}>{r.rbP?"1/"+fmt(r.rbP,1):"–"}</td><td>{r.gouseiD?"1/"+fmt(r.gouseiD,1):"–"}</td><td>{fmt(r.maxDama)}</td></tr>
           ))}</tbody>
         </table></div>
-        <div className="note" style={{marginTop:6}}>★ = バケ確率1/250以内(累計1,000G以上)、または回転数非公開の店はRB30回以上(設定5・6候補の目安)</div>
+        <div className="note" style={{marginTop:6}}>★ = バケ確率1/250以内(累計2,500G以上)、または回転数非公開の店はRB30回以上(設定5・6候補の目安)</div>
         {f.date&&sorted.length>0&&<div style={{marginTop:10}}><button className="btn danger small" onClick={delDay}>この日のデータを削除</button></div>}
       </div>
     </div>
@@ -485,7 +509,7 @@ function DaiPage({db,stores,models}){
 function AggPage({db,stores,models}){
   const [f,setF]=useState({store:"",model:"",date:""});
   const [th56,setTh56]=useState("250");
-  const [minS,setMinS]=useState("1000");
+  const [minS,setMinS]=useState("2500");
   const [thRb,setThRb]=useState("30");
   const pool=db.records.filter(r=>(!f.store||r.store===f.store)&&(!f.model||r.model===f.model)).map(withDerived);
   const thV=parseFloat(th56)||250, minV=parseFloat(minS)||0, rbV=parseFloat(thRb)||30;
@@ -498,6 +522,24 @@ function AggPage({db,stores,models}){
   const mxDais=[...new Set(pool.map(r=>r.dai))].sort((a,b)=>a-b);
   const mxDates=[...new Set(pool.map(r=>r.date))].sort();
   const mxCell={}; pool.forEach(r=>{mxCell[r.date+"|"+r.dai]=r;});
+  // 狙い台予測: 直近日のデータから翌日の候補をスコアリング
+  const baseDate=mxDates.length?(f.date||mxDates[mxDates.length-1]):null;
+  const prevRecs=baseDate?pool.filter(r=>r.date===baseDate):[];
+  const histHot={}; pool.forEach(r=>{ if(isHotR(r)) histHot[r.dai]=(histHot[r.dai]||0)+1; });
+  const hotPrev=new Set(prevRecs.filter(isHotR).map(r=>r.dai));
+  const picks=prevRecs.map(r=>{
+    let score=0; const why=[];
+    if(r.rbP!=null){
+      if(r.rbP>=1000){score+=2;why.push("前日バケ4桁 1/"+fmt(r.rbP,0));}
+      else if(r.rbP>=500){score+=1;why.push("前日バケ500超 1/"+fmt(r.rbP,0));}
+      else if(r.rbP>=300&&r.rbP<400){score-=2;why.push("バケ300台(入りにくい)");}
+    }
+    const h=histHot[r.dai]||0;
+    if(h>=2){score+=2;why.push("★実績"+h+"回");} else if(h===1){score+=1;why.push("★実績1回");}
+    if(hotPrev.has(r.dai-1)||hotPrev.has(r.dai+1)){score+=1;why.push("前日★の隣");}
+    if(hotPrev.has(r.dai)){why.push("前日★");}
+    return {dai:r.dai,rbP:r.rbP,score,why};
+  }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,15);
   // by date
   const byDate={};
   pool.forEach(r=>{ (byDate[r.date]=byDate[r.date]||[]).push(r); });
@@ -577,6 +619,22 @@ function AggPage({db,stores,models}){
         )}
       </div>
       <div className="card">
+        <h2>狙い台予測（{baseDate?baseDate.slice(5)+" のデータ → 翌日":"–"}）</h2>
+        {!f.store?<div className="note">店舗を選択すると表示されます。</div>:(
+          <React.Fragment>
+            {picks.length?(
+              <div className="scrollx"><table className="dt">
+                <thead><tr><th>台番号</th><th>点</th><th>前日バケ</th><th style={{textAlign:"left"}}>根拠</th></tr></thead>
+                <tbody>{picks.map((x,i)=>(
+                  <tr key={i}><td><span className="daichip">{x.dai}</span></td><td style={{color:"var(--good)",fontWeight:700}}>{x.score}</td><td>{x.rbP?"1/"+fmt(x.rbP,0):"–"}</td><td style={{textAlign:"left",fontFamily:"inherit",whiteSpace:"normal"}}>{x.why.map((w,j)=><span key={j} className="pill" style={{cursor:"default",margin:"0 4px 2px 0"}}>{w}</span>)}</td></tr>
+                ))}</tbody>
+              </table></div>
+            ):<div className="note">条件を満たす台がありません（当日のデータを取り込むと翌日の候補が出ます）</div>}
+            <div className="note" style={{marginTop:6}}>採点ルール: 前日バケ1/1000以上 +2、1/500以上 +1、1/300台 −2、過去★実績 +1〜2、前日★台の隣 +1。日付フィルタで基準日を変えられます（過去日の答え合わせ用）。</div>
+          </React.Fragment>
+        )}
+      </div>
+      <div className="card">
         <h2>末尾別集計</h2>
         <div className="scrollx"><table className="dt">
           <thead><tr><th>末尾</th><th>台日数</th><th>平均合成</th><th>平均当り回数</th></tr></thead>
@@ -603,6 +661,38 @@ function ToolPage({db,setDb}){
     const blob=new Blob([JSON.stringify(db)],{type:"application/json"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="slot_data_backup.json";a.click();
   };
+  const importCSV=e=>{
+    const file=e.target.files[0]; if(!file) return;
+    const rd=new FileReader();
+    rd.onload=()=>{ try{
+      const text=String(rd.result).replace(/^\uFEFF/,"");
+      const lines=text.split(/\r?\n/).filter(l=>l.trim());
+      if(lines.length<2) throw "データ行がありません";
+      const unq=c=>c.replace(/^"|"$/g,"").trim();
+      const head=lines[0].split(",").map(c=>unq(c).toLowerCase());
+      const idx=k=>head.indexOf(k);
+      const iS=idx("store"),iM=idx("model"),iD=idx("date"),iDai=idx("dai");
+      if(iS<0||iM<0||iD<0||iDai<0) throw "ヘッダーに store, model, date, dai が必要です（CSV出力と同じ形式）";
+      const numCols=["start","bb","rb","bonus","gousei","maxdama","prevstart"];
+      const keyName={maxdama:"maxDama",prevstart:"prevStart"};
+      const recs=[];
+      for(let i=1;i<lines.length;i++){
+        const c=lines[i].split(",").map(unq);
+        const store=c[iS],model=c[iM];
+        let date=(c[iD]||"").replace(/\//g,"-");
+        const dai=parseInt(c[iDai]);
+        if(!store||!model||!/^\d{4}-\d{2}-\d{2}$/.test(date)||isNaN(dai)) continue;
+        const r={store,model,date,dai};
+        numCols.forEach(k=>{ const j=idx(k); if(j>=0){ const v=num(c[j]); if(v!=null) r[keyName[k]||k]=v; } });
+        recs.push(r);
+      }
+      if(!recs.length) throw "有効な行がありませんでした";
+      setDb(prev=>{ const key=r=>`${r.store}|${r.model}|${r.date}|${r.dai}`; const m=new Map(prev.records.map(r=>[key(r),r])); recs.forEach(r=>m.set(key(r),r)); return {records:[...m.values()]}; });
+      alert(recs.length+"件を読み込みました（マージ）");
+    }catch(err){ alert("CSV読み込み失敗: "+err); } };
+    rd.readAsText(file);
+    e.target.value="";
+  };
   const importJSON=e=>{
     const file=e.target.files[0]; if(!file) return;
     const rd=new FileReader();
@@ -622,6 +712,8 @@ function ToolPage({db,setDb}){
         </div>
         <label className="fl">バックアップJSONを復元（マージ）</label>
         <input type="file" accept=".json" ref={fileRef} onChange={importJSON} style={{color:"var(--sub)",fontSize:12}}/>
+        <label className="fl">CSVを読み込み（マージ / CSV出力と同じ列形式）</label>
+        <input type="file" accept=".csv,text/csv" onChange={importCSV} style={{color:"var(--sub)",fontSize:12}}/>
       </div>
       <div className="card">
         <h2>データ管理</h2>

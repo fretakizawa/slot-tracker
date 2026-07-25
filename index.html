@@ -85,6 +85,16 @@ function saveDB(db){ try{ localStorage.setItem(LS_KEY, JSON.stringify(db)); retu
 
 /* ---------- number utils ---------- */
 const num = s => { if(s==null) return null; const t=String(s).replace(/[,回枚\s]/g,"").replace(/^1\//,""); if(t===""||t==="-") return null; const v=parseFloat(t); return isNaN(v)?null:v; };
+function normDate(v){
+  if(v==null) return null;
+  let t=String(v).trim().replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));
+  t=t.replace(/[年月]/g,"-").replace(/日/g,"").replace(/[\/\.]/g,"-").trim();
+  let m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return m[1]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[3]).padStart(2,"0");
+  m=t.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return m[1]+"-"+m[2]+"-"+m[3];
+  return null;
+}
 const fmt = (v,d=0) => v==null?"–":v.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
 
 /* ---------- parser ---------- */
@@ -679,14 +689,14 @@ function ToolPage({db,setDb}){
       for(let i=1;i<lines.length;i++){
         const c=lines[i].split(",").map(unq);
         const store=c[iS],model=c[iM];
-        let date=(c[iD]||"").replace(/\//g,"-");
-        const dai=parseInt(c[iDai]);
-        if(!store||!model||!/^\d{4}-\d{2}-\d{2}$/.test(date)||isNaN(dai)) continue;
+        let date=normDate(c[iD]);
+        const dai=parseInt(String(c[iDai]).replace(/[^\d]/g,""));
+        if(!store||!model||!date||isNaN(dai)) continue;
         const r={store,model,date,dai};
         numCols.forEach(k=>{ const j=idx(k); if(j>=0){ const v=num(c[j]); if(v!=null) r[keyName[k]||k]=v; } });
         recs.push(r);
       }
-      if(!recs.length) throw "有効な行がありませんでした";
+      if(!recs.length) throw "有効な行がありませんでした（date列がYYYY-MM-DD形式か、store/model/daiが空でないか確認してください）";
       setDb(prev=>{ const key=r=>`${r.store}|${r.model}|${r.date}|${r.dai}`; const m=new Map(prev.records.map(r=>[key(r),r])); recs.forEach(r=>m.set(key(r),r)); return {records:[...m.values()]}; });
       alert(recs.length+"件を読み込みました（マージ）");
     }catch(err){ alert("CSV読み込み失敗: "+err); } };

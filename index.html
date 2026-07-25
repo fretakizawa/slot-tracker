@@ -521,6 +521,7 @@ function AggPage({db,stores,models}){
   const [th56,setTh56]=useState("250");
   const [minS,setMinS]=useState("2500");
   const [thRb,setThRb]=useState("30");
+  const [mxMonth,setMxMonth]=useState("");
   const pool=db.records.filter(r=>(!f.store||r.store===f.store)&&(!f.model||r.model===f.model)).map(withDerived);
   const thV=parseFloat(th56)||250, minV=parseFloat(minS)||0, rbV=parseFloat(thRb)||30;
   const isHotR=r=>hotCheck(r,thV,minV,rbV)!=null;
@@ -530,10 +531,13 @@ function AggPage({db,stores,models}){
     return (b.rb||0)-(a.rb||0);
   }).slice(0,50);
   const mxDais=[...new Set(pool.map(r=>r.dai))].sort((a,b)=>a-b);
-  const mxDates=[...new Set(pool.map(r=>r.date))].sort();
+  const allMxDates=[...new Set(pool.map(r=>r.date))].sort();
+  const mxMonths=[...new Set(allMxDates.map(d=>d.slice(0,7)))].sort();
+  const curMonth=(mxMonth&&mxMonths.includes(mxMonth))?mxMonth:(mxMonths.length?mxMonths[mxMonths.length-1]:"");
+  const mxDates=allMxDates.filter(d=>d.slice(0,7)===curMonth);
   const mxCell={}; pool.forEach(r=>{mxCell[r.date+"|"+r.dai]=r;});
   // 狙い台予測: 直近日のデータから翌日の候補をスコアリング
-  const baseDate=mxDates.length?(f.date||mxDates[mxDates.length-1]):null;
+  const baseDate=allMxDates.length?(f.date||allMxDates[allMxDates.length-1]):null;
   const prevRecs=baseDate?pool.filter(r=>r.date===baseDate):[];
   const histHot={}; pool.forEach(r=>{ if(isHotR(r)) histHot[r.dai]=(histHot[r.dai]||0)+1; });
   const hotPrev=new Set(prevRecs.filter(isHotR).map(r=>r.dai));
@@ -612,6 +616,9 @@ function AggPage({db,stores,models}){
         <h2>★カレンダー（日付 × 台番号）</h2>
         {!f.store?<div className="note">店舗（と必要なら機種）を選択すると表示されます。台番号は店舗内でのみ一意のためです。</div>:(
           <React.Fragment>
+            <div style={{marginBottom:8}}>{mxMonths.map(m=>(
+              <span key={m} className={"pill"+(m===curMonth?" on":"")} onClick={()=>setMxMonth(m)}>{m.replace("-","/")}</span>
+            ))}</div>
             <div className="scrollx"><table className="mx">
               <thead><tr><th className="dcol">日付</th>{mxDais.map(d=><th key={d}>{d}</th>)}</tr></thead>
               <tbody>{mxDates.map(dt=>(

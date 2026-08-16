@@ -80,6 +80,24 @@ table.mx td.dot{color:#4a505c}
 .rcell .tag{font-size:9px;margin-top:2px}
 .rcell.chg .tag{color:var(--bad)} .rcell.unk .tag{color:#8b93a1}
 .rcell.keep{border-color:var(--good);background:rgba(79,209,139,.10)}
+.bigbtn{display:flex;gap:8px;margin:10px 0}
+.bigbtn button{flex:1;border:none;border-radius:10px;padding:16px 0;font-size:17px;font-weight:800;cursor:pointer}
+.bigbtn .bBB{background:var(--bb);color:#2a0d0d}
+.bigbtn .bRB{background:var(--rb);color:#0b1c33}
+.hitrow{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #262a33;font-size:12px}
+.hitrow .g{font-family:var(--mono);font-size:13px;min-width:58px;text-align:right}
+.badge{border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700}
+.badge.bb{background:rgba(255,93,93,.2);color:var(--bb)}
+.badge.rb{background:rgba(93,162,255,.2);color:var(--rb)}
+.kgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.kbtn{border:none;border-radius:12px;padding:10px 2px 8px;text-align:center;cursor:pointer;user-select:none}
+.kbtn .kn{font-size:26px;font-weight:800;line-height:1.1;font-family:var(--mono)}
+.kbtn .kp{font-size:10px;opacity:.75;font-family:var(--mono)}
+.kbtn .kl{font-size:11px;font-weight:700;margin-top:2px}
+.kminus{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:5px}
+.kminus button{background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:8px;padding:5px 0;font-size:13px;cursor:pointer}
+.kten{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px}
+.kten button{border-radius:9px;padding:9px 0;font-size:14px;font-weight:800;cursor:pointer;border:none}
 .rcell.keep .tag{color:var(--good)}
 ol.steps{padding-left:18px;font-size:12px;color:var(--text);line-height:1.9}
 .previewWrap{border:1px dashed var(--accent-dim);border-radius:8px;padding:8px;margin-top:10px}
@@ -93,7 +111,7 @@ const {useState,useEffect,useMemo,useRef} = React;
 const LS_KEY = "slotTracker_v1";
 
 /* ---------- storage ---------- */
-function loadDB(){ try{ const d=JSON.parse(localStorage.getItem(LS_KEY)); if(d&&Array.isArray(d.records)) return {reels:{},...d}; }catch(e){} return {records:[],reels:{}}; }
+function loadDB(){ try{ const d=JSON.parse(localStorage.getItem(LS_KEY)); if(d&&Array.isArray(d.records)) return {reels:{},hits:{},...d}; }catch(e){} return {records:[],reels:{},hits:{}}; }
 function saveDB(db){ try{ localStorage.setItem(LS_KEY, JSON.stringify(db)); return true; }catch(e){ return false; } }
 
 /* ---------- number utils ---------- */
@@ -396,9 +414,10 @@ function App(){
       {tab==="dai"&&<DaiPage db={db} setDb={setDb} stores={stores} models={models}/>}
       {tab==="agg"&&<AggPage db={db} stores={stores} models={models}/>}
       {tab==="reel"&&<ReelPage db={db} setDb={setDb} stores={stores} models={models}/>}
+      {tab==="hit"&&<HitPage db={db} setDb={setDb} stores={stores} models={models}/>}
       {tab==="tool"&&<ToolPage db={db} setDb={setDb}/>}
       <div className="tabbar">
-        {[["import","⤵","取込"],["list","☰","一覧"],["dai","№","台履歴"],["reel","◎","出目"],["agg","∑","集計"],["tool","⚙","ツール"]].map(([k,ic,l])=>(
+        {[["import","⤵","取込"],["list","☰","一覧"],["dai","№","台履歴"],["reel","◎","出目"],["hit","✚","実戦"],["agg","∑","集計"],["tool","⚙","ツール"]].map(([k,ic,l])=>(
           <button key={k} className={tab===k?"on":""} onClick={()=>setTab(k)}><span className="ic">{ic}</span>{l}</button>
         ))}
       </div>
@@ -758,6 +777,164 @@ function AggPage({db,stores,models}){
   );
 }
 
+/* ---------- 実戦カウンター ---------- */
+function HitPage({db,setDb,stores,models}){
+  const today=new Date().toISOString().slice(0,10);
+  const [store,setStore]=useState(stores[0]||"");
+  const [model,setModel]=useState("マイジャグラーV");
+  const [date,setDate]=useState(today);
+  const [dai,setDai]=useState("");
+  const [g,setG]=useState("");
+  const [trig,setTrig]=useState("単独");
+  const hits=db.hits||{};
+  const key=store&&dai?store+"|"+date+"|"+parseInt(dai):null;
+  const sess=(key&&hits[key])||{startG:0,list:[]};
+  const list=sess.list||[];
+  const save=(patch)=>{ if(!key) return;
+    setDb(prev=>{ const h={...(prev.hits||{})}; h[key]={...sess,...patch}; return {...prev,hits:h}; }); };
+  const addHit=(type)=>{
+    if(!key){ alert("店舗・日付・台番号を入力してください"); return; }
+    const gv=parseInt(String(g).replace(/[^\d]/g,""));
+    if(isNaN(gv)){ alert("現在のゲーム数を入力してください"); return; }
+    save({list:[...list,{g:gv,type,trig}].sort((a,b)=>a.g-b.g)});
+    setG("");
+  };
+  const delHit=i=>{ if(confirm("この当たり記録を削除しますか?")) save({list:list.filter((_,j)=>j!==i)}); };
+  // 小役カウンター
+  const KOYAKU=[
+    {k:"budou",label:"ブドウ",color:"#8b5cf6",th:[["1",5.98],["6",5.65]]},
+    {k:"cherry",label:"チェリー",color:"#ef4444",th:[["1",38.1],["6",35.1]]},
+    {k:"bell",label:"ベル",color:"#eab308",th:null},
+    {k:"other",label:sess.otherLabel||"その他",color:"#38bdf8",th:null},
+  ];
+  const cnt=sess.counts||{};
+  const bump=(k,d)=>{ const v=Math.max(0,(cnt[k]||0)+d); save({counts:{...cnt,[k]:v}}); };
+  // stats
+  const startG=parseInt(sess.startG)||0;
+  const lastG=list.length?list[list.length-1].g:startG;
+  const [endG,setEndG]=useState("");
+  const totalG=(parseInt(endG)||lastG)-startG;
+  const bb=list.filter(x=>x.type==="BB").length, rb=list.filter(x=>x.type==="RB").length;
+  const soloRB=list.filter(x=>x.type==="RB"&&x.trig==="単独").length;
+  const chRB=list.filter(x=>x.type==="RB"&&x.trig==="チェリー").length;
+  const soloBB=list.filter(x=>x.type==="BB"&&x.trig==="単独").length;
+  const P=(n)=>n>0&&totalG>0?totalG/n:null;
+  const rows=list.map((x,i)=>({...x,i,span:i===0?x.g-startG:x.g-list[i-1].g}));
+  // 既存セッション一覧
+  const sessions=Object.keys(hits).filter(k=>!store||k.startsWith(store+"|")).sort().reverse().slice(0,12);
+  return (
+    <div className="page">
+      <div className="card">
+        <div className="row2">
+          <div><label className="fl">店舗</label>
+            <input type="text" list="hStore" value={store} onChange={e=>setStore(e.target.value)} placeholder="コア21"/>
+            <datalist id="hStore">{stores.map(x=><option key={x} value={x}/>)}</datalist></div>
+          <div><label className="fl">台番号</label>
+            <input type="text" inputMode="numeric" value={dai} onChange={e=>setDai(e.target.value)} placeholder="526"/></div>
+        </div>
+        <div className="row2">
+          <div><label className="fl">日付</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
+          <div><label className="fl">打ち出し開始G（途中参加なら入力）</label>
+            <input type="text" inputMode="numeric" value={sess.startG||""} onChange={e=>save({startG:parseInt(e.target.value)||0})} placeholder="0"/></div>
+        </div>
+      </div>
+      {key&&(
+      <React.Fragment>
+        <div className="card">
+          <h2>小役カウンター</h2>
+          <div className="kgrid">{KOYAKU.map(o=>{
+            const n=cnt[o.k]||0; const pr=(n>0&&totalG>0)?totalG/n:null;
+            return (
+              <div key={o.k} className="kbtn" style={{background:o.color+"26",border:"1px solid "+o.color+"66"}} onClick={()=>bump(o.k,1)}>
+                <div className="kp" style={{color:o.color}}>{pr?"1/"+fmt(pr,2):"1/–"}</div>
+                <div className="kn" style={{color:o.color}} onClick={e=>{e.stopPropagation(); const v=prompt(o.label+"の回数を直接入力",String(n)); if(v!==null&&v.trim()!==""){ const num=parseInt(v.replace(/[^\d]/g,"")); if(!isNaN(num)) save({counts:{...cnt,[o.k]:num}}); }}}>{n}</div>
+                <div className="kl" style={{color:o.color}}>{o.label}</div>
+              </div>
+            );
+          })}</div>
+          <div className="kten">{KOYAKU.map(o=>(
+            <button key={o.k} style={{background:o.color+"3d",color:o.color}} onClick={()=>bump(o.k,10)}>＋10</button>
+          ))}</div>
+          <div className="kminus">{KOYAKU.map(o=>(
+            <button key={o.k} onClick={()=>bump(o.k,-1)}>−1</button>
+          ))}</div>
+          {(()=>{ const n=cnt.budou||0; const pr=(n>0&&totalG>0)?totalG/n:null; if(!pr) return null;
+            const near=pr<=5.70?"設定6域":(pr<=5.79?"設定5域":(pr<=5.86?"設定3-4域":"設定1-2域"));
+            const good=pr<=5.79;
+            return <div className="note" style={{marginTop:8}}>ブドウ 1/{fmt(pr,2)} → <b style={{color:good?"var(--good)":"var(--text)"}}>{near}</b>（設定1=1/5.98・5=1/5.76・6=1/5.65／回転数{fmt(totalG)}Gで計算）</div>;
+          })()}
+          <div className="note" style={{marginTop:6}}>タップで+1、下の−1で訂正。確率は下の「終了G」または最終当選Gまでの回転数で計算します。
+            <span style={{marginLeft:6,color:"var(--accent)",cursor:"pointer"}} onClick={()=>{const v=prompt("4つ目のボタン名",sess.otherLabel||"その他"); if(v!==null) save({otherLabel:v.trim()||null});}}>4つ目の名前を変更</span>
+          </div>
+        </div>
+        <div className="card">
+          <h2>当たりを記録</h2>
+          <label className="fl">現在のゲーム数（台のトータルG）</label>
+          <input type="text" inputMode="numeric" value={g} onChange={e=>setG(e.target.value)} placeholder="1234" style={{fontSize:20,fontFamily:"var(--mono)",textAlign:"center"}}/>
+          <label className="fl">契機</label>
+          <div>{["単独","チェリー","不明"].map(v=>(
+            <span key={v} className={"pill"+(trig===v?" on":"")} onClick={()=>setTrig(v)}>{v}</span>
+          ))}</div>
+          <div className="bigbtn">
+            <button className="bBB" onClick={()=>addHit("BB")}>BB</button>
+            <button className="bRB" onClick={()=>addHit("RB")}>RB</button>
+          </div>
+          <div className="note">ボタンを押すとゲーム数・契機とセットで記録されます。</div>
+        </div>
+        <div className="card">
+          <h2>現在の状況</h2>
+          <label className="fl">終了G（打ち切ったら入力・空欄なら最終当選G）</label>
+          <input type="text" inputMode="numeric" value={endG} onChange={e=>setEndG(e.target.value)} placeholder={String(lastG)}/>
+          <div className="statgrid" style={{marginTop:10}}>
+            <div className="stat"><div className="v">{fmt(totalG)}</div><div className="k">回転数</div></div>
+            <div className="stat"><div className="v" style={{color:"var(--bb)"}}>{bb}</div><div className="k">BB</div></div>
+            <div className="stat"><div className="v" style={{color:"var(--rb)"}}>{rb}</div><div className="k">RB</div></div>
+          </div>
+          <div className="scrollx"><table className="dt">
+            <thead><tr><th>指標</th><th>確率</th><th>設定1</th><th>設定6</th></tr></thead>
+            <tbody>
+              <tr><td>BB</td><td>{P(bb)?"1/"+fmt(P(bb),1):"–"}</td><td>1/273.1</td><td>1/240.9</td></tr>
+              <tr><td>RB(バケ)</td><td style={{color:P(rb)&&P(rb)<=250?"var(--good)":undefined,fontWeight:700}}>{P(rb)?"1/"+fmt(P(rb),1):"–"}</td><td>1/439.8</td><td>1/229.1</td></tr>
+              <tr><td>合成</td><td>{P(bb+rb)?"1/"+fmt(P(bb+rb),1):"–"}</td><td>1/168.4</td><td>1/117.4</td></tr>
+              <tr><td>単独RB</td><td style={{color:soloRB>=3?"var(--good)":undefined}}>{soloRB}回 {P(soloRB)?"(1/"+fmt(P(soloRB),0)+")":""}</td><td colSpan="2" className="mut" style={{textAlign:"left"}}>単独RB比率が高いほど高設定期待</td></tr>
+            </tbody>
+          </table></div>
+          <div className="note" style={{marginTop:6}}>内訳: BB単独{soloBB} / RB単独{soloRB}・RBチェリー{chRB}</div>
+          <div style={{marginTop:8}}><button className="btn danger small" onClick={()=>{ if(confirm("この台の記録（当たり・小役）をすべて消しますか?")) save({list:[],counts:{}}); }}>この台の記録をリセット</button></div>
+        </div>
+        <div className="card">
+          <h2>当たり履歴 <span className="mut">({list.length}回)</span></h2>
+          {rows.length?rows.map(x=>(
+            <div key={x.i} className="hitrow">
+              <span className="g">{fmt(x.g)}G</span>
+              <span className={"badge "+(x.type==="BB"?"bb":"rb")}>{x.type}</span>
+              <span className="mut">{x.trig}</span>
+              <span style={{marginLeft:"auto"}} className="mut">消化{fmt(x.span)}G</span>
+              <span onClick={()=>delHit(x.i)} style={{color:"var(--bad)",cursor:"pointer",padding:"0 4px"}}>×</span>
+            </div>
+          )):<div className="note">まだ記録がありません。</div>}
+        </div>
+      </React.Fragment>
+      )}
+      <div className="card">
+        <h2>保存済みの実戦記録</h2>
+        {sessions.length?sessions.map(k=>{
+          const [st,dt,dn]=k.split("|"); const se=hits[k]; const n=(se.list||[]).length;
+          const b=(se.list||[]).filter(x=>x.type==="BB").length, r=n-b;
+          return (
+            <div key={k} className="hitrow" onClick={()=>{setStore(st);setDate(dt);setDai(dn);setEndG("");}} style={{cursor:"pointer"}}>
+              <span className="mut">{dt.slice(5)}</span>
+              <span className="daichip">{dn}</span>
+              <span className="mut">{st}</span>
+              <span style={{marginLeft:"auto"}}><span style={{color:"var(--bb)"}}>BB{b}</span> / <span style={{color:"var(--rb)"}}>RB{r}</span>{(se.counts&&se.counts.budou)?<span className="mut"> / ブ{se.counts.budou}</span>:null}</span>
+            </div>
+          );
+        }):<div className="note">保存済みの記録はありません。</div>}
+        <div className="note" style={{marginTop:6}}>タップすると読み込みます。データはJSONバックアップにも含まれます。</div>
+      </div>
+    </div>
+  );
+}
 /* ---------- 出目(リールコード)記録 ---------- */
 function ReelPage({db,setDb,stores,models}){
   const today=new Date().toISOString().slice(0,10);

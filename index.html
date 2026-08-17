@@ -94,10 +94,13 @@ table.mx td.dot{color:#4a505c}
 .kbtn .kn{font-size:26px;font-weight:800;line-height:1.1;font-family:var(--mono)}
 .kbtn .kp{font-size:10px;opacity:.75;font-family:var(--mono)}
 .kbtn .kl{font-size:11px;font-weight:700;margin-top:2px}
-.kminus{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:5px}
-.kminus button{background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:8px;padding:5px 0;font-size:13px;cursor:pointer}
-.kten{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px}
-.kten button{border-radius:9px;padding:9px 0;font-size:14px;font-weight:800;cursor:pointer;border:none}
+.kminus{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px}
+.kminus button{background:transparent;border:1px solid var(--line);color:var(--sub);border-radius:8px;padding:5px 0;font-size:12px;cursor:pointer}
+.kten{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+.kten button{border-radius:11px;padding:16px 0;font-size:19px;font-weight:800;cursor:pointer;border:2px solid transparent;transform:scale(1);transition:transform .08s,box-shadow .15s,border-color .15s}
+.kten button.flash{transform:scale(1.06);box-shadow:0 0 0 3px var(--kflash,rgba(255,255,255,.5));border-color:var(--kflash,#fff)}
+.kbtn{transition:box-shadow .15s,border-color .15s}
+.kbtn.flash{box-shadow:0 0 0 3px var(--kflash,rgba(255,255,255,.5))}
 .rcell.keep .tag{color:var(--good)}
 ol.steps{padding-left:18px;font-size:12px;color:var(--text);line-height:1.9}
 .previewWrap{border:1px dashed var(--accent-dim);border-radius:8px;padding:8px;margin-top:10px}
@@ -281,6 +284,57 @@ function estDiff(r,cfg){
   const IN=(G-replay)*3;
   const OUT=(r.bb||0)*c.bb+(r.rb||0)*c.rb+budou*c.pBudou+cherry*c.pCherry;
   return Math.round(OUT-IN);
+}
+/* ---------- 機種プロファイル（設定判別用） ---------- */
+const MACHINE_PROFILES={
+  "マイジャグラーV":{
+    bb:[273.1,269.7,269.7,259.0,254.9,240.9],
+    rb:[439.8,399.6,331.0,315.1,255.0,229.1],
+    budou:[5.98,5.88,5.84,5.81,5.76,5.65],
+  },
+  "アイムジャグラーEX":{
+    bb:[273.1,269.7,269.7,259.0,259.0,255.0],
+    rb:[439.8,399.6,331.0,315.1,255.0,255.0],
+    budou:[6.02,6.02,6.02,6.02,6.02,5.78],
+  },
+  "ネオアイムジャグラーEX":{
+    bb:[273.1,269.7,269.7,259.0,259.0,255.0],
+    rb:[439.8,399.6,331.0,315.1,255.0,255.0],
+    budou:[6.02,6.02,6.02,6.02,6.02,5.78],
+  },
+  "ウルトラミラクルジャグラー":{
+    bb:[267.5,261.1,256.0,242.7,233.2,216.3],
+    rb:[425.6,402.1,350.5,322.8,297.9,277.7],
+    budou:[5.93,5.93,5.93,5.93,5.87,5.81],
+  },
+};
+function guessProfile(model){
+  if(!model) return null;
+  const m=model.replace(/\s/g,"");
+  const hit=Object.keys(MACHINE_PROFILES).find(k=>m.includes(k.replace(/\s/g,""))||k.replace(/\s/g,"").includes(m));
+  return hit?MACHINE_PROFILES[hit]:null;
+}
+// 二項尤度によるベイズ事後確率
+function settingPosterior(profile,obs){
+  // obs: {bb:{n,N}, rb:{n,N}, budou:{n,N}}  n=回数, N=試行回数(母数)
+  const logBinomLikelihood=(n,N,p)=>{
+    if(N<=0) return 0;
+    if(p<=0||p>=1) return -Infinity;
+    return n*Math.log(p)+(N-n)*Math.log(1-p); // C(N,n)は全設定共通なので省略
+  };
+  const settings=[0,1,2,3,4,5]; // index → 設定1-6
+  const logs=settings.map(i=>{
+    let L=0;
+    if(profile.bb&&obs.bb&&obs.bb.N>0) L+=logBinomLikelihood(obs.bb.n,obs.bb.N,1/profile.bb[i]);
+    if(profile.rb&&obs.rb&&obs.rb.N>0) L+=logBinomLikelihood(obs.rb.n,obs.rb.N,1/profile.rb[i]);
+    if(profile.budou&&obs.budou&&obs.budou.N>0) L+=logBinomLikelihood(obs.budou.n,obs.budou.N,1/profile.budou[i]);
+    return L;
+  });
+  const maxL=Math.max(...logs.filter(x=>isFinite(x)));
+  const exps=logs.map(L=>isFinite(L)?Math.exp(L-maxL):0);
+  const sum=exps.reduce((a,b)=>a+b,0);
+  if(sum<=0) return settings.map(()=>1/6);
+  return exps.map(e=>e/sum);
 }
 /* ---------- ブドウ逆算 ---------- */
 const BUDOU_TABLE=[[1,5.98],[2,5.88],[3,5.84],[4,5.81],[5,5.76],[6,5.65]];
@@ -531,7 +585,7 @@ function ListPage({db,setDb,stores,models}){
   const th=(k,l)=><th onClick={()=>setSort(s=>({k,asc:s.k===k?!s.asc:true}))} style={{cursor:"pointer",color:sort.k===k?"var(--accent)":undefined}}>{l}{sort.k===k?(sort.asc?"▲":"▼"):""}</th>;
   const delDay=()=>{
     if(!f.date||!confirm(`${f.date} の表示中データ ${recs.length}件を削除しますか?`)) return;
-    setDb(prev=>({records:prev.records.filter(r=>!((!f.store||r.store===f.store)&&(!f.model||r.model===f.model)&&r.date===f.date))}));
+    setDb(prev=>({...prev,records:prev.records.filter(r=>!((!f.store||r.store===f.store)&&(!f.model||r.model===f.model)&&r.date===f.date))}));
   };
   return (
     <div className="page">
@@ -554,7 +608,7 @@ function ListPage({db,setDb,stores,models}){
 /* ---------- dai history ---------- */
 function DaiPage({db,setDb,stores,models}){
   const setMeta=(h,patch)=>{
-    setDb(prev=>({records:prev.records.map(r=>(r.store===h.store&&r.model===h.model&&r.date===h.date&&r.dai===h.dai)?{...r,...patch}:r)}));
+    setDb(prev=>({...prev,records:prev.records.map(r=>(r.store===h.store&&r.model===h.model&&r.date===h.date&&r.dai===h.dai)?{...r,...patch}:r)}));
   };
   const toggleMemo=(h,v)=>{
     const cur=(h.memo||"").split(/[,、]/).map(x=>x.trim()).filter(Boolean);
@@ -779,11 +833,16 @@ function AggPage({db,stores,models}){
 
 /* ---------- 実戦カウンター ---------- */
 function HitPage({db,setDb,stores,models}){
+  const profile=guessProfile(model);
   const today=new Date().toISOString().slice(0,10);
-  const [store,setStore]=useState(stores[0]||"");
-  const [model,setModel]=useState("マイジャグラーV");
-  const [date,setDate]=useState(today);
-  const [dai,setDai]=useState("");
+  const [store,setStore]=useState(localStorage.getItem("hit_lastStore")||stores[0]||"");
+  const [model,setModel]=useState(localStorage.getItem("hit_lastModel")||models[0]||"マイジャグラーV");
+  const [date,setDate]=useState(localStorage.getItem("hit_lastDate")||today);
+  const [dai,setDai]=useState(localStorage.getItem("hit_lastDai")||"");
+  useEffect(()=>{ localStorage.setItem("hit_lastStore",store); },[store]);
+  useEffect(()=>{ localStorage.setItem("hit_lastModel",model); },[model]);
+  useEffect(()=>{ localStorage.setItem("hit_lastDate",date); },[date]);
+  useEffect(()=>{ localStorage.setItem("hit_lastDai",dai); },[dai]);
   const [g,setG]=useState("");
   const [trig,setTrig]=useState("単独");
   const hits=db.hits||{};
@@ -808,7 +867,9 @@ function HitPage({db,setDb,stores,models}){
     {k:"other",label:sess.otherLabel||"その他",color:"#38bdf8",th:null},
   ];
   const cnt=sess.counts||{};
-  const bump=(k,d)=>{ const v=Math.max(0,(cnt[k]||0)+d); save({counts:{...cnt,[k]:v}}); };
+  const [flash,setFlash]=useState({});
+  const bump=(k,d)=>{ const v=Math.max(0,(cnt[k]||0)+d); save({counts:{...cnt,[k]:v}});
+    if(d>0){ setFlash(f=>({...f,[k]:true})); setTimeout(()=>setFlash(f=>({...f,[k]:false})),260); } };
   // stats
   const startG=parseInt(sess.startG)||0;
   const lastG=list.length?list[list.length-1].g:startG;
@@ -832,6 +893,10 @@ function HitPage({db,setDb,stores,models}){
           <div><label className="fl">台番号</label>
             <input type="text" inputMode="numeric" value={dai} onChange={e=>setDai(e.target.value)} placeholder="526"/></div>
         </div>
+        <label className="fl">機種（設定判別に使用）</label>
+        <input type="text" list="hModel" value={model} onChange={e=>setModel(e.target.value)} placeholder="マイジャグラーV"/>
+        <datalist id="hModel">{Object.keys(MACHINE_PROFILES).map(x=><option key={x} value={x}/>)}</datalist>
+        {!profile&&<div className="note" style={{marginTop:4}}>未対応機種名です。対応: {Object.keys(MACHINE_PROFILES).join("・")}</div>}
         <div className="row2">
           <div><label className="fl">日付</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
           <div><label className="fl">打ち出し開始G（途中参加なら入力）</label>
@@ -845,18 +910,18 @@ function HitPage({db,setDb,stores,models}){
           <div className="kgrid">{KOYAKU.map(o=>{
             const n=cnt[o.k]||0; const pr=(n>0&&totalG>0)?totalG/n:null;
             return (
-              <div key={o.k} className="kbtn" style={{background:o.color+"26",border:"1px solid "+o.color+"66"}} onClick={()=>bump(o.k,1)}>
+              <div key={o.k} className={"kbtn"+(flash[o.k]?" flash":"")} style={{background:o.color+"26",border:"1px solid "+o.color+"66","--kflash":o.color}} onClick={()=>bump(o.k,1)}>
                 <div className="kp" style={{color:o.color}}>{pr?"1/"+fmt(pr,2):"1/–"}</div>
                 <div className="kn" style={{color:o.color}} onClick={e=>{e.stopPropagation(); const v=prompt(o.label+"の回数を直接入力",String(n)); if(v!==null&&v.trim()!==""){ const num=parseInt(v.replace(/[^\d]/g,"")); if(!isNaN(num)) save({counts:{...cnt,[o.k]:num}}); }}}>{n}</div>
                 <div className="kl" style={{color:o.color}}>{o.label}</div>
               </div>
             );
           })}</div>
-          <div className="kten">{KOYAKU.map(o=>(
-            <button key={o.k} style={{background:o.color+"3d",color:o.color}} onClick={()=>bump(o.k,10)}>＋10</button>
-          ))}</div>
           <div className="kminus">{KOYAKU.map(o=>(
             <button key={o.k} onClick={()=>bump(o.k,-1)}>−1</button>
+          ))}</div>
+          <div className="kten">{KOYAKU.map(o=>(
+            <button key={o.k} className={flash[o.k]?"flash":""} style={{background:o.color+"3d",color:o.color,"--kflash":o.color}} onClick={()=>bump(o.k,10)}>＋10</button>
           ))}</div>
           {(()=>{ const n=cnt.budou||0; const pr=(n>0&&totalG>0)?totalG/n:null; if(!pr) return null;
             const near=pr<=5.70?"設定6域":(pr<=5.79?"設定5域":(pr<=5.86?"設定3-4域":"設定1-2域"));
@@ -900,8 +965,34 @@ function HitPage({db,setDb,stores,models}){
             </tbody>
           </table></div>
           <div className="note" style={{marginTop:6}}>内訳: BB単独{soloBB} / RB単独{soloRB}・RBチェリー{chRB}</div>
-          <div style={{marginTop:8}}><button className="btn danger small" onClick={()=>{ if(confirm("この台の記録（当たり・小役）をすべて消しますか?")) save({list:[],counts:{}}); }}>この台の記録をリセット</button></div>
+          <div style={{marginTop:8}}><button className="btn danger small" onClick={()=>{ if(confirm("この台の記録（当たり"+list.length+"回・小役カウンター）をすべて消します。本当によろしいですか?")){ if(confirm("もう一度確認：本当に削除しますか？元に戻せません。")) save({list:[],counts:{}}); } }}>この台の記録をリセット</button></div>
         </div>
+        {profile&&(
+        <div className="card">
+          <h2>設定判別（ベイズ推定）</h2>
+          {(()=>{
+            const obs={
+              bb:{n:soloBB+list.filter(x=>x.type==="BB").length-soloBB, N:totalG}, // 全BB
+              rb:{n:rb, N:totalG},
+              budou:{n:cnt.budou||0, N:totalG},
+            };
+            obs.bb.n=bb;
+            const post=(totalG>0)?settingPosterior(profile,obs):[1/6,1/6,1/6,1/6,1/6,1/6];
+            const maxI=post.indexOf(Math.max(...post));
+            return (
+              <React.Fragment>
+                <div className="kgrid" style={{gridTemplateColumns:"repeat(6,1fr)"}}>{post.map((p,i)=>(
+                  <div key={i} className="kbtn" style={{background:i===maxI?"rgba(79,209,139,.18)":"var(--panel2)",border:"1px solid "+(i===maxI?"var(--good)":"var(--line)")}}>
+                    <div className="kn" style={{fontSize:18,color:i===maxI?"var(--good)":"var(--text)"}}>{(p*100).toFixed(0)}%</div>
+                    <div className="kl" style={{color:i===maxI?"var(--good)":"var(--sub)"}}>設定{i+1}</div>
+                  </div>
+                ))}</div>
+                <div className="note" style={{marginTop:8}}>使用データ: BB{fmt(bb)}回・RB{fmt(rb)}回{cnt.budou?"・ブドウ"+fmt(cnt.budou)+"回":""}／回転数{fmt(totalG)}G。{totalG<2000?"回転数が少ないため参考程度です（2000G未満）。":"各設定の理論値との二項尤度から算出した相対確率です。"}</div>
+              </React.Fragment>
+            );
+          })()}
+        </div>
+        )}
         <div className="card">
           <h2>当たり履歴 <span className="mut">({list.length}回)</span></h2>
           {rows.length?rows.map(x=>(

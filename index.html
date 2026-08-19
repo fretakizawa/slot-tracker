@@ -833,12 +833,12 @@ function AggPage({db,stores,models}){
 
 /* ---------- 実戦カウンター ---------- */
 function HitPage({db,setDb,stores,models}){
-  const profile=guessProfile(model);
   const today=new Date().toISOString().slice(0,10);
   const [store,setStore]=useState(localStorage.getItem("hit_lastStore")||stores[0]||"");
   const [model,setModel]=useState(localStorage.getItem("hit_lastModel")||models[0]||"マイジャグラーV");
   const [date,setDate]=useState(localStorage.getItem("hit_lastDate")||today);
   const [dai,setDai]=useState(localStorage.getItem("hit_lastDai")||"");
+  const profile=guessProfile(model);
   useEffect(()=>{ localStorage.setItem("hit_lastStore",store); },[store]);
   useEffect(()=>{ localStorage.setItem("hit_lastModel",model); },[model]);
   useEffect(()=>{ localStorage.setItem("hit_lastDate",date); },[date]);

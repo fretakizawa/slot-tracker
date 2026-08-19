@@ -83,6 +83,10 @@ table.mx td.dot{color:#4a505c}
 .rcell.gak{border-color:#f0b429;background:rgba(240,180,41,.16)}
 .rcell.gak .no{color:#f0b429}
 .rcell.gak .tag{color:#f0b429}
+.rcell.pmode{border-style:dashed}
+.pickbadge{position:absolute;top:2px;left:4px;font-size:9px;font-weight:800;padding:0 4px;border-radius:4px;line-height:1.5}
+.pickbadge.honmei{background:#ffd700;color:#3a2c00}
+.pickbadge.taikou{background:#8fb3ff;color:#0b1c33}
 .rcell.editmode{border-style:dashed}
 .rcell.editmode .no{color:var(--bad)}
 .rcell .rmx{position:absolute;top:2px;right:4px;font-size:10px;color:var(--bad)}
@@ -296,24 +300,42 @@ function estDiff(r,cfg){
 /* ---------- 機種プロファイル（設定判別用） ---------- */
 const MACHINE_PROFILES={
   "マイジャグラーV":{
-    bb:[273.1,269.7,269.7,259.0,254.9,240.9],
-    rb:[439.8,399.6,331.0,315.1,255.0,229.1],
-    budou:[5.98,5.88,5.84,5.81,5.76,5.65],
+    bb:[273.1,270.8,266.4,254.0,240.1,229.1],
+    rb:[409.6,385.5,336.1,290.0,268.6,229.1],
+    budou:[5.90,5.85,5.80,5.78,5.76,5.66],
+    soloRb:[662.0,615.7,494.6,426.4,390.1,331.0], // 単独REG(実測値2ソース平均)
+    cherryRb:[1092.3,1074.4,1057.0,1008.3,862.3,762.1], // チェリー重複REG(実測値)
   },
   "アイムジャグラーEX":{
     bb:[273.1,269.7,269.7,259.0,259.0,255.0],
     rb:[439.8,399.6,331.0,315.1,255.0,255.0],
     budou:[6.02,6.02,6.02,6.02,6.02,5.78],
+    centerCherry:[2184.5,2184.5,2184.5,1820.4,1820.4,1820.4], // 中段(レア)チェリー出現率(実測値)。設定1-3と4-6の2段階
   },
   "ネオアイムジャグラーEX":{
     bb:[273.1,269.7,269.7,259.0,259.0,255.0],
     rb:[439.8,399.6,331.0,315.1,255.0,255.0],
     budou:[6.02,6.02,6.02,6.02,6.02,5.78],
+    centerCherry:[2184.5,2184.5,2184.5,1820.4,1820.4,1820.4],
   },
   "ウルトラミラクルジャグラー":{
     bb:[267.5,261.1,256.0,242.7,233.2,216.3],
     rb:[425.6,402.1,350.5,322.8,297.9,277.7],
     budou:[5.93,5.93,5.93,5.93,5.87,5.81],
+  },
+  "ファンキージャグラー2":{
+    bb:[266.4,259.0,256.0,249.2,240.1,219.9],
+    rb:[439.8,407.1,366.1,322.8,299.3,262.1],
+    budou:[5.94,5.92,5.88,5.83,5.76,5.67],
+    soloRb:[636.27,574.88,512.00,478.36,436.91,425.56],
+    cherryRb:[1057.03,992.97,885.62,809.09,728.18,642.51],
+  },
+  "ハッピージャグラーV3":{
+    bb:[273.1,270.8,263.2,254.0,239.2,226.0],
+    rb:[397.2,362.1,332.7,300.6,273.1,256.0],
+    budou:[6.04,6.01,5.98,5.84,5.81,5.79],
+    soloRb:[636.27,569.88,532.81,478.36,436.91,425.56],
+    cherryRb:[1057.03,992.97,885.62,809.09,728.18,642.51],
   },
 };
 function guessProfile(model){
@@ -336,6 +358,9 @@ function settingPosterior(profile,obs){
     if(profile.bb&&obs.bb&&obs.bb.N>0) L+=logBinomLikelihood(obs.bb.n,obs.bb.N,1/profile.bb[i]);
     if(profile.rb&&obs.rb&&obs.rb.N>0) L+=logBinomLikelihood(obs.rb.n,obs.rb.N,1/profile.rb[i]);
     if(profile.budou&&obs.budou&&obs.budou.N>0) L+=logBinomLikelihood(obs.budou.n,obs.budou.N,1/profile.budou[i]);
+    if(profile.soloRb&&obs.soloRb&&obs.soloRb.N>0) L+=logBinomLikelihood(obs.soloRb.n,obs.soloRb.N,1/profile.soloRb[i]);
+    if(profile.cherryRb&&obs.cherryRb&&obs.cherryRb.N>0) L+=logBinomLikelihood(obs.cherryRb.n,obs.cherryRb.N,1/profile.cherryRb[i]);
+    if(profile.centerCherry&&obs.centerCherry&&obs.centerCherry.N>0) L+=logBinomLikelihood(obs.centerCherry.n,obs.centerCherry.N,1/profile.centerCherry[i]);
     return L;
   });
   const maxL=Math.max(...logs.filter(x=>isFinite(x)));
@@ -469,7 +494,7 @@ function App(){
     <div>
       <div className="header">
         <h1>台データ<span className="seg">記録</span></h1>
-        <span className="sub">{db.records.length}件 / v11 (学訓状態追加)</span>
+        <span className="sub">{db.records.length}件 / v17 (本命対抗の予想印追加)</span>
       </div>
       {tab==="import"&&<ImportPage stores={stores} models={models} onSave={addRecords} setMsg={setMsg} msg={msg}/>}
       {tab==="list"&&<ListPage db={db} setDb={setDb} stores={stores} models={models}/>}
@@ -887,6 +912,7 @@ function HitPage({db,setDb,stores,models}){
   const soloRB=list.filter(x=>x.type==="RB"&&x.trig==="単独").length;
   const chRB=list.filter(x=>x.type==="RB"&&x.trig==="チェリー").length;
   const soloBB=list.filter(x=>x.type==="BB"&&x.trig==="単独").length;
+  const centerCnt=list.filter(x=>x.trig==="中段チェリー").length; // BB/RB問わず中段チェリー重複の回数
   const P=(n)=>n>0&&totalG>0?totalG/n:null;
   const rows=list.map((x,i)=>({...x,i,span:i===0?x.g-startG:x.g-list[i-1].g}));
   // 既存セッション一覧
@@ -945,7 +971,7 @@ function HitPage({db,setDb,stores,models}){
           <label className="fl">現在のゲーム数（台のトータルG）</label>
           <input type="text" inputMode="numeric" value={g} onChange={e=>setG(e.target.value)} placeholder="1234" style={{fontSize:20,fontFamily:"var(--mono)",textAlign:"center"}}/>
           <label className="fl">契機</label>
-          <div>{["単独","チェリー","不明"].map(v=>(
+          <div>{["単独","チェリー","中段チェリー","不明"].map(v=>(
             <span key={v} className={"pill"+(trig===v?" on":"")} onClick={()=>setTrig(v)}>{v}</span>
           ))}</div>
           <div className="bigbtn">
@@ -972,7 +998,7 @@ function HitPage({db,setDb,stores,models}){
               <tr><td>単独RB</td><td style={{color:soloRB>=3?"var(--good)":undefined}}>{soloRB}回 {P(soloRB)?"(1/"+fmt(P(soloRB),0)+")":""}</td><td colSpan="2" className="mut" style={{textAlign:"left"}}>単独RB比率が高いほど高設定期待</td></tr>
             </tbody>
           </table></div>
-          <div className="note" style={{marginTop:6}}>内訳: BB単独{soloBB} / RB単独{soloRB}・RBチェリー{chRB}</div>
+          <div className="note" style={{marginTop:6}}>内訳: BB単独{soloBB} / RB単独{soloRB}・RBチェリー{chRB}{centerCnt?" / 中段チェリー"+centerCnt:""}</div>
           <div style={{marginTop:8}}><button className="btn danger small" onClick={()=>{ if(confirm("この台の記録（当たり"+list.length+"回・小役カウンター）をすべて消します。本当によろしいですか?")){ if(confirm("もう一度確認：本当に削除しますか？元に戻せません。")) save({list:[],counts:{}}); } }}>この台の記録をリセット</button></div>
         </div>
         {profile&&(
@@ -980,11 +1006,13 @@ function HitPage({db,setDb,stores,models}){
           <h2>設定判別（ベイズ推定）</h2>
           {(()=>{
             const obs={
-              bb:{n:soloBB+list.filter(x=>x.type==="BB").length-soloBB, N:totalG}, // 全BB
+              bb:{n:bb, N:totalG},
               rb:{n:rb, N:totalG},
               budou:{n:cnt.budou||0, N:totalG},
+              soloRb:{n:soloRB, N:totalG},
+              cherryRb:{n:chRB, N:totalG},
+              centerCherry:{n:centerCnt, N:totalG},
             };
-            obs.bb.n=bb;
             const post=(totalG>0)?settingPosterior(profile,obs):[1/6,1/6,1/6,1/6,1/6,1/6];
             const maxI=post.indexOf(Math.max(...post));
             return (
@@ -995,7 +1023,7 @@ function HitPage({db,setDb,stores,models}){
                     <div className="kl" style={{color:i===maxI?"var(--good)":"var(--sub)"}}>設定{i+1}</div>
                   </div>
                 ))}</div>
-                <div className="note" style={{marginTop:8}}>使用データ: BB{fmt(bb)}回・RB{fmt(rb)}回{cnt.budou?"・ブドウ"+fmt(cnt.budou)+"回":""}／回転数{fmt(totalG)}G。{totalG<2000?"回転数が少ないため参考程度です（2000G未満）。":"各設定の理論値との二項尤度から算出した相対確率です。"}</div>
+                <div className="note" style={{marginTop:8}}>使用データ: BB{fmt(bb)}回・RB{fmt(rb)}回{cnt.budou?"・ブドウ"+fmt(cnt.budou)+"回":""}{profile.soloRb?"・単独RB"+fmt(soloRB)+"回":""}{profile.cherryRb?"・チェリーRB"+fmt(chRB)+"回":""}{profile.centerCherry?"・中段チェリー"+fmt(centerCnt)+"回":""}／回転数{fmt(totalG)}G。{totalG<2000?"回転数が少ないため参考程度です（2000G未満）。":"各設定の理論値との二項尤度から算出した相対確率です。"}</div>
               </React.Fragment>
             );
           })()}
@@ -1041,6 +1069,7 @@ function ReelPage({db,setDb,stores,models}){
   const [date,setDate]=useState(today);
   const [mode,setMode]=useState("night"); // night=コード入力 / morning=変化チェック
   const [editing,setEditing]=useState(false);
+  const [pickMode,setPickMode]=useState(false);
   const reels=db.reels||{};
   const reelHidden=db.reelHidden||{};
   const hidden=new Set(reelHidden[store]||[]);
@@ -1057,9 +1086,12 @@ function ReelPage({db,setDb,stores,models}){
   const dais=[...new Set([...daisFromRec,...daisFromReel])].filter(d=>!hidden.has(d)).sort((a,b)=>a-b);
   const setCell=(dt,d,patch)=>{
     setDb(prev=>{ const rl={...(prev.reels||{})}; const k=K(dt,d); rl[k]={...(rl[k]||{}),...patch}; 
-      if(!rl[k].code&&!rl[k].st) delete rl[k];
+      if(!rl[k].code&&!rl[k].st&&!rl[k].pick) delete rl[k];
       return {...prev,reels:rl}; });
   };
+  const cyclePick=(dt,d)=>{ const cur=(reels[K(dt,d)]||{}).pick||null;
+    const order={null:"honmei",honmei:"taikou",taikou:null};
+    setCell(dt,d,{pick:order[cur]}); };
   const cycle=d=>{ const cur=(reels[K(date,d)]||{}).st||null;
     const order={null:"chg",chg:"gak",gak:"unk",unk:null};
     setCell(date,d,{st:order[cur]}); };
@@ -1084,8 +1116,10 @@ function ReelPage({db,setDb,stores,models}){
           <span className={"pill"+(mode==="night"?" on":"")} onClick={()=>setMode("night")}>閉店前：コード入力</span>
           <span className={"pill"+(mode==="morning"?" on":"")} onClick={()=>setMode("morning")}>翌朝：変化チェック</span>
           <span className={"pill"+(editing?" on":"")} style={editing?{background:"var(--bb)",borderColor:"var(--bb)",color:"#2a0d0d"}:null} onClick={()=>setEditing(e=>!e)}>{editing?"編集終了":"台を編集"}</span>
+          <span className={"pill"+(pickMode?" on":"")} style={pickMode?{background:"#ffd700",borderColor:"#ffd700",color:"#3a2c00"}:null} onClick={()=>setPickMode(p=>!p)}>{pickMode?"予想印：終了":"本命・対抗をつける"}</span>
         </div>
         {editing&&<div className="note" style={{marginTop:6}}>編集モード中：不要な台をタップすると一覧から除外されます（データは消えません、いつでも戻せます）。</div>}
+        {pickMode&&<div className="note" style={{marginTop:6}}>予想印モード中：台をタップすると <b>本命→対抗→解除</b> の順に切り替わります。翌朝の変化チェック画面にもそのまま表示されます。</div>}
         {editing&&hidden.size>0&&<div className="note" style={{marginTop:4}}>除外中: {[...hidden].sort((a,b)=>a-b).join("・")} <span style={{color:"var(--accent)",cursor:"pointer"}} onClick={()=>setDb(prev=>({...prev,reelHidden:{...(prev.reelHidden||{}),[store]:[]}}))}>全部戻す</span></div>}
       </div>
       {!store?<div className="card"><div className="note">店舗を選択してください。台番号は取り込み済みデータから自動で並びます。</div></div>:(
@@ -1096,13 +1130,16 @@ function ReelPage({db,setDb,stores,models}){
             <div className="note" style={{marginBottom:8}}>各台をタップして3桁（例: 220）を入力。翌朝はこの数字と見比べます。</div>
             <div className="rgrid">{dais.map(d=>{
               const c=(reels[K(date,d)]||{}).code||"";
+              const pk=(reels[K(date,d)]||{}).pick||null;
               return (
-                <div key={d} className={"rcell"+(editing?" editmode":"")} onClick={()=>{
+                <div key={d} className={"rcell"+(editing?" editmode":(pickMode?" pmode":""))} onClick={()=>{
                   if(editing){ toggleHidden(d); return; }
+                  if(pickMode){ cyclePick(date,d); return; }
                   const v=prompt("台"+d+" のリールコード（3桁 例:220）",c);
                   if(v!==null) setCell(date,d,{code:v.trim().replace(/[^\d]/g,"").slice(0,3)||null});
                 }}>
                   {editing&&<span className="rmx">✕</span>}
+                  {pk&&<span className={"pickbadge "+pk}>{pk==="honmei"?"本命":"対抗"}</span>}
                   <div className="no">{d}</div>
                   <div className={"cd"+(c?"":" empty")}>{c||"–––"}</div>
                 </div>
@@ -1112,25 +1149,27 @@ function ReelPage({db,setDb,stores,models}){
         ):(
           <React.Fragment>
             <h2>{date.slice(5)} 朝の出目チェック</h2>
-            <div className="note" style={{marginBottom:8}}>表示は{prevDate.slice(5)}のコード。タップで <b>変化→学訓→不明→解除</b> の順に切り替わります。</div>
+            <div className="note" style={{marginBottom:8}}>表示は{prevDate.slice(5)}のコード。タップで <b>変化→ガックン→不明→解除</b> の順に切り替わります。</div>
             <div className="row2" style={{marginBottom:8}}>
               <button className="btn ghost small" onClick={allUnknown}>全台不明にする</button>
               <button className="btn ghost small" onClick={clearAll}>チェック解除</button>
             </div>
-            <div className="legend"><span style={{color:"var(--good)"}}>据え置き {keepCount}</span><span style={{color:"var(--bad)"}}>変化 {chgCount}</span><span style={{color:"#f0b429"}}>学訓 {gakCount}</span><span className="mut">不明 {unkCount}</span></div>
+            <div className="legend"><span style={{color:"var(--good)"}}>据え置き {keepCount}</span><span style={{color:"var(--bad)"}}>変化 {chgCount}</span><span style={{color:"#f0b429"}}>ガックン {gakCount}</span><span className="mut">不明 {unkCount}</span></div>
             <div className="rgrid">{dais.map(d=>{
               const st=(reels[K(date,d)]||{}).st||null;
               const pc=(reels[K(prevDate,d)]||{}).code||"";
+              const pk=(reels[K(prevDate,d)]||{}).pick||null;
               return (
-                <div key={d} className={"rcell "+(editing?"editmode":(st==="chg"?"chg":(st==="gak"?"gak":(st==="unk"?"unk":(pc?"keep":"")))))} onClick={()=>{ if(editing){ toggleHidden(d); return; } cycle(d); }}>
+                <div key={d} className={"rcell "+(editing?"editmode":(pickMode?"pmode ":"")+(st==="chg"?"chg":(st==="gak"?"gak":(st==="unk"?"unk":(pc?"keep":"")))))} onClick={()=>{ if(editing){ toggleHidden(d); return; } if(pickMode){ cyclePick(prevDate,d); return; } cycle(d); }}>
                   {editing&&<span className="rmx">✕</span>}
+                  {pk&&<span className={"pickbadge "+pk}>{pk==="honmei"?"本命":"対抗"}</span>}
                   <div className="no">{d}</div>
                   <div className={"cd"+(pc?"":" empty")}>{pc||"–––"}</div>
-                  <div className="tag">{editing?"":(st==="chg"?"変化":(st==="gak"?"学訓":(st==="unk"?"不明":(pc?"据え置き":""))))}</div>
+                  <div className="tag">{editing?"":(st==="chg"?"変化":(st==="gak"?"ガックン":(st==="unk"?"不明":(pc?"据え置き":""))))}</div>
                 </div>
               );
             })}</div>
-            <div className="note" style={{marginTop:8}}>据え置き＝出目一致・未タップ（ガックン未確認）。学訓＝出目一致だがガックンで店側の操作を確認。変化＝出目自体が違う。前日コードが未記録の台は「–––」（判定なし）。</div>
+            <div className="note" style={{marginTop:8}}>据え置き＝出目一致・未タップ（ガックン未確認）。ガックン＝出目一致だがガックンで店側の操作を確認。変化＝出目自体が違う。前日コードが未記録の台は「–––」（判定なし）。</div>
           </React.Fragment>
         )}
       </div>)}

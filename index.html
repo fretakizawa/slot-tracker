@@ -80,6 +80,13 @@ table.mx td.dot{color:#4a505c}
 .rcell .tag{font-size:9px;margin-top:2px}
 .rcell.chg .tag{color:var(--bad)} .rcell.unk .tag{color:#8b93a1}
 .rcell.keep{border-color:var(--good);background:rgba(79,209,139,.10)}
+.rcell.gak{border-color:#f0b429;background:rgba(240,180,41,.16)}
+.rcell.gak .no{color:#f0b429}
+.rcell.gak .tag{color:#f0b429}
+.rcell.editmode{border-style:dashed}
+.rcell.editmode .no{color:var(--bad)}
+.rcell .rmx{position:absolute;top:2px;right:4px;font-size:10px;color:var(--bad)}
+.rcell{position:relative}
 .bigbtn{display:flex;gap:8px;margin:10px 0}
 .bigbtn button{flex:1;border:none;border-radius:10px;padding:16px 0;font-size:17px;font-weight:800;cursor:pointer}
 .bigbtn .bBB{background:var(--bb);color:#2a0d0d}
@@ -119,6 +126,7 @@ function saveDB(db){ try{ localStorage.setItem(LS_KEY, JSON.stringify(db)); retu
 
 /* ---------- number utils ---------- */
 const num = s => { if(s==null) return null; const t=String(s).replace(/[,回枚\s]/g,"").replace(/^1\//,""); if(t===""||t==="-") return null; const v=parseFloat(t); return isNaN(v)?null:v; };
+function ymdLocal(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function normDate(v){
   if(v==null) return null;
   let t=String(v).trim().replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));
@@ -149,7 +157,7 @@ function mapHeader(cells){
     return null;
   });
 }
-function addDays(iso,delta){ const d=new Date(iso+"T00:00:00"); d.setDate(d.getDate()+delta); return d.toISOString().slice(0,10); }
+function addDays(iso,delta){ const d=new Date(iso+"T00:00:00"); d.setDate(d.getDate()+delta); return ymdLocal(d); }
 function parseBookmarkletJSON(obj){
   const tables=(obj.tables||[]).filter(t=>t.length>1);
   if(!tables.length) throw "テーブルが見つかりません";
@@ -461,7 +469,7 @@ function App(){
     <div>
       <div className="header">
         <h1>台データ<span className="seg">記録</span></h1>
-        <span className="sub">{db.records.length}件 / DATA ONLINE取込対応</span>
+        <span className="sub">{db.records.length}件 / v11 (学訓状態追加)</span>
       </div>
       {tab==="import"&&<ImportPage stores={stores} models={models} onSave={addRecords} setMsg={setMsg} msg={msg}/>}
       {tab==="list"&&<ListPage db={db} setDb={setDb} stores={stores} models={models}/>}
@@ -484,7 +492,7 @@ function ImportPage({stores,models,onSave,setMsg,msg}){
   const [text,setText]=useState("");
   const [store,setStore]=useState(localStorage.getItem("st_lastStore")||"");
   const [model,setModel]=useState("");
-  const [date,setDate]=useState(new Date().toISOString().slice(0,10));
+  const [date,setDate]=useState(ymdLocal(new Date()));
   const [preview,setPreview]=useState(null);
   const [copied,setCopied]=useState(false);
 
@@ -833,7 +841,7 @@ function AggPage({db,stores,models}){
 
 /* ---------- 実戦カウンター ---------- */
 function HitPage({db,setDb,stores,models}){
-  const today=new Date().toISOString().slice(0,10);
+  const today=ymdLocal(new Date());
   const [store,setStore]=useState(localStorage.getItem("hit_lastStore")||stores[0]||"");
   const [model,setModel]=useState(localStorage.getItem("hit_lastModel")||models[0]||"マイジャグラーV");
   const [date,setDate]=useState(localStorage.getItem("hit_lastDate")||today);
@@ -1028,32 +1036,41 @@ function HitPage({db,setDb,stores,models}){
 }
 /* ---------- 出目(リールコード)記録 ---------- */
 function ReelPage({db,setDb,stores,models}){
-  const today=new Date().toISOString().slice(0,10);
+  const today=ymdLocal(new Date());
   const [store,setStore]=useState(stores[0]||"");
   const [date,setDate]=useState(today);
   const [mode,setMode]=useState("night"); // night=コード入力 / morning=変化チェック
+  const [editing,setEditing]=useState(false);
   const reels=db.reels||{};
+  const reelHidden=db.reelHidden||{};
+  const hidden=new Set(reelHidden[store]||[]);
+  const toggleHidden=d=>{
+    setDb(prev=>{ const rh={...(prev.reelHidden||{})}; const cur=new Set(rh[store]||[]);
+      if(cur.has(d)) cur.delete(d); else cur.add(d);
+      rh[store]=[...cur]; return {...prev,reelHidden:rh}; });
+  };
   const K=(dt,d)=>store+"|"+dt+"|"+d;
-  const prevDate=(()=>{ const x=new Date(date+"T00:00:00"); x.setDate(x.getDate()-1); return x.toISOString().slice(0,10); })();
+  const prevDate=(()=>{ const x=new Date(date+"T00:00:00"); x.setDate(x.getDate()-1); return ymdLocal(x); })();
   // 台番号候補: 記録済みの台 + その店の実績台
   const daisFromRec=[...new Set(db.records.filter(r=>r.store===store).map(r=>r.dai))];
   const daisFromReel=Object.keys(reels).filter(k=>k.startsWith(store+"|")).map(k=>parseInt(k.split("|")[2]));
-  const dais=[...new Set([...daisFromRec,...daisFromReel])].sort((a,b)=>a-b);
+  const dais=[...new Set([...daisFromRec,...daisFromReel])].filter(d=>!hidden.has(d)).sort((a,b)=>a-b);
   const setCell=(dt,d,patch)=>{
     setDb(prev=>{ const rl={...(prev.reels||{})}; const k=K(dt,d); rl[k]={...(rl[k]||{}),...patch}; 
       if(!rl[k].code&&!rl[k].st) delete rl[k];
       return {...prev,reels:rl}; });
   };
   const cycle=d=>{ const cur=(reels[K(date,d)]||{}).st||null;
-    const next=cur===null?"chg":(cur==="chg"?"unk":null);
-    setCell(date,d,{st:next}); };
+    const order={null:"chg",chg:"gak",gak:"unk",unk:null};
+    setCell(date,d,{st:order[cur]}); };
   const allUnknown=()=>{ if(!confirm(date+" の全台を「不明」にしますか?")) return;
     setDb(prev=>{ const rl={...(prev.reels||{})}; dais.forEach(d=>{ const k=K(date,d); rl[k]={...(rl[k]||{}),st:"unk"}; }); return {...prev,reels:rl}; }); };
   const clearAll=()=>{ if(!confirm(date+" のチェックをすべて解除しますか?(コードは残ります)")) return;
     setDb(prev=>{ const rl={...(prev.reels||{})}; dais.forEach(d=>{ const k=K(date,d); if(rl[k]){ const o={...rl[k]}; delete o.st; if(o.code) rl[k]=o; else delete rl[k]; } }); return {...prev,reels:rl}; }); };
   const chgCount=dais.filter(d=>(reels[K(date,d)]||{}).st==="chg").length;
+  const gakCount=dais.filter(d=>(reels[K(date,d)]||{}).st==="gak").length;
   const unkCount=dais.filter(d=>(reels[K(date,d)]||{}).st==="unk").length;
-  const keepCount=dais.length-chgCount-unkCount;
+  const keepCount=dais.length-chgCount-gakCount-unkCount;
   return (
     <div className="page">
       <div className="card">
@@ -1066,7 +1083,10 @@ function ReelPage({db,setDb,stores,models}){
         <div style={{marginTop:8}}>
           <span className={"pill"+(mode==="night"?" on":"")} onClick={()=>setMode("night")}>閉店前：コード入力</span>
           <span className={"pill"+(mode==="morning"?" on":"")} onClick={()=>setMode("morning")}>翌朝：変化チェック</span>
+          <span className={"pill"+(editing?" on":"")} style={editing?{background:"var(--bb)",borderColor:"var(--bb)",color:"#2a0d0d"}:null} onClick={()=>setEditing(e=>!e)}>{editing?"編集終了":"台を編集"}</span>
         </div>
+        {editing&&<div className="note" style={{marginTop:6}}>編集モード中：不要な台をタップすると一覧から除外されます（データは消えません、いつでも戻せます）。</div>}
+        {editing&&hidden.size>0&&<div className="note" style={{marginTop:4}}>除外中: {[...hidden].sort((a,b)=>a-b).join("・")} <span style={{color:"var(--accent)",cursor:"pointer"}} onClick={()=>setDb(prev=>({...prev,reelHidden:{...(prev.reelHidden||{}),[store]:[]}}))}>全部戻す</span></div>}
       </div>
       {!store?<div className="card"><div className="note">店舗を選択してください。台番号は取り込み済みデータから自動で並びます。</div></div>:(
       <div className="card">
@@ -1077,10 +1097,12 @@ function ReelPage({db,setDb,stores,models}){
             <div className="rgrid">{dais.map(d=>{
               const c=(reels[K(date,d)]||{}).code||"";
               return (
-                <div key={d} className="rcell" onClick={()=>{
+                <div key={d} className={"rcell"+(editing?" editmode":"")} onClick={()=>{
+                  if(editing){ toggleHidden(d); return; }
                   const v=prompt("台"+d+" のリールコード（3桁 例:220）",c);
                   if(v!==null) setCell(date,d,{code:v.trim().replace(/[^\d]/g,"").slice(0,3)||null});
                 }}>
+                  {editing&&<span className="rmx">✕</span>}
                   <div className="no">{d}</div>
                   <div className={"cd"+(c?"":" empty")}>{c||"–––"}</div>
                 </div>
@@ -1090,24 +1112,25 @@ function ReelPage({db,setDb,stores,models}){
         ):(
           <React.Fragment>
             <h2>{date.slice(5)} 朝の出目チェック</h2>
-            <div className="note" style={{marginBottom:8}}>表示は{prevDate.slice(5)}のコード。<b>変わっている台をタップ</b>（もう一度タップで不明、3回で解除）。</div>
+            <div className="note" style={{marginBottom:8}}>表示は{prevDate.slice(5)}のコード。タップで <b>変化→学訓→不明→解除</b> の順に切り替わります。</div>
             <div className="row2" style={{marginBottom:8}}>
               <button className="btn ghost small" onClick={allUnknown}>全台不明にする</button>
               <button className="btn ghost small" onClick={clearAll}>チェック解除</button>
             </div>
-            <div className="legend"><span style={{color:"var(--good)"}}>据え置き {keepCount}</span><span style={{color:"var(--bad)"}}>変化 {chgCount}</span><span className="mut">不明 {unkCount}</span></div>
+            <div className="legend"><span style={{color:"var(--good)"}}>据え置き {keepCount}</span><span style={{color:"var(--bad)"}}>変化 {chgCount}</span><span style={{color:"#f0b429"}}>学訓 {gakCount}</span><span className="mut">不明 {unkCount}</span></div>
             <div className="rgrid">{dais.map(d=>{
               const st=(reels[K(date,d)]||{}).st||null;
               const pc=(reels[K(prevDate,d)]||{}).code||"";
               return (
-                <div key={d} className={"rcell "+(st==="chg"?"chg":(st==="unk"?"unk":(pc?"keep":"")))} onClick={()=>cycle(d)}>
+                <div key={d} className={"rcell "+(editing?"editmode":(st==="chg"?"chg":(st==="gak"?"gak":(st==="unk"?"unk":(pc?"keep":"")))))} onClick={()=>{ if(editing){ toggleHidden(d); return; } cycle(d); }}>
+                  {editing&&<span className="rmx">✕</span>}
                   <div className="no">{d}</div>
                   <div className={"cd"+(pc?"":" empty")}>{pc||"–––"}</div>
-                  <div className="tag">{st==="chg"?"変化":(st==="unk"?"不明":(pc?"据え置き":""))}</div>
+                  <div className="tag">{editing?"":(st==="chg"?"変化":(st==="gak"?"学訓":(st==="unk"?"不明":(pc?"据え置き":""))))}</div>
                 </div>
               );
             })}</div>
-            <div className="note" style={{marginTop:8}}>前日コードが未記録の台は「–––」表示です（判定なし）。</div>
+            <div className="note" style={{marginTop:8}}>据え置き＝出目一致・未タップ（ガックン未確認）。学訓＝出目一致だがガックンで店側の操作を確認。変化＝出目自体が違う。前日コードが未記録の台は「–––」（判定なし）。</div>
           </React.Fragment>
         )}
       </div>)}

@@ -494,7 +494,7 @@ function App(){
     <div>
       <div className="header">
         <h1>台データ<span className="seg">記録</span></h1>
-        <span className="sub">{db.records.length}件 / v17 (本命対抗の予想印追加)</span>
+        <span className="sub">{db.records.length}件 / v19 (閉店前コード編集Undo対応)</span>
       </div>
       {tab==="import"&&<ImportPage stores={stores} models={models} onSave={addRecords} setMsg={setMsg} msg={msg}/>}
       {tab==="list"&&<ListPage db={db} setDb={setDb} stores={stores} models={models}/>}
@@ -652,10 +652,15 @@ function DaiPage({db,setDb,stores,models}){
   const [dai,setDai]=useState(null);
   const [diffMode,setDiffMode]=useState("daily");
   const [editDate,setEditDate]=useState(null);
+  const [diffMonth,setDiffMonth]=useState("");
   const pool=db.records.filter(r=>(!f.store||r.store===f.store)&&(!f.model||r.model===f.model));
   const dais=[...new Set(pool.map(r=>r.dai))].sort((a,b)=>a-b);
-  const hist=pool.filter(r=>r.dai===dai).sort((a,b)=>a.date<b.date?-1:1).map(withDerived).map(h=>({...h,diff:estDiff(h)}));
-  let accD=0; const diffSeries=hist.map(h=>{ if(h.diff!=null) accD+=h.diff; return {x:h.date,y:diffMode==="cum"?accD:h.diff}; });
+  const allHist=pool.filter(r=>r.dai===dai).sort((a,b)=>a.date<b.date?-1:1).map(withDerived).map(h=>({...h,diff:estDiff(h)}));
+  const diffMonths=[...new Set(allHist.map(h=>h.date.slice(0,7)))].sort();
+  const curDiffMonth=(diffMonth&&diffMonths.includes(diffMonth))?diffMonth:(diffMonths.length?diffMonths[diffMonths.length-1]:"");
+  const hist=allHist; // 表・棒グラフは全期間のまま
+  const diffHist=allHist.filter(h=>h.date.slice(0,7)===curDiffMonth); // 差枚グラフは選択月のみ
+  let accD=0; const diffSeries=diffHist.map(h=>{ if(h.diff!=null) accD+=h.diff; return {x:h.date,y:diffMode==="cum"?accD:h.diff}; });
   return (
     <div className="page">
       <Filters stores={stores} models={models} f={f} setF={setF}/>
@@ -677,7 +682,11 @@ function DaiPage({db,setDb,stores,models}){
                 <span className={"pill"+(diffMode==="cum"?" on":"")} onClick={()=>setDiffMode("cum")}>累積</span>
               </span>
             </div>
-            <LineChart data={diffSeries} yLabel={diffMode==="cum"?"累積差枚(推定)":"日別差枚(推定)"} color="#4fd18b" zeroLine/>
+            <div style={{margin:"6px 0"}}>{diffMonths.map(m=>(
+              <span key={m} className={"pill"+(m===curDiffMonth?" on":"")} onClick={()=>setDiffMonth(m)}>{m.replace("-","/")}</span>
+            ))}</div>
+            <LineChart data={diffSeries} yLabel={diffMode==="cum"?curDiffMonth.replace("-","/")+" 累積差枚(推定)":"日別差枚(推定)"} color="#4fd18b" zeroLine/>
+            <div className="note" style={{marginTop:2}}>累積は選択中の月内のみで計算（月をまたいで引き継ぎません）。</div>
             <div className="note" style={{marginTop:4}}>推定式:(BB×240＋RB×96＋ブドウ×8＋チェリー×2)−(総回転−リプレイ)×3。設定1の小役確率(ブドウ1/5.98・リプレイ1/7.3・チェリー1/38.1)で計算しているため、実際の小役の引きにより誤差があります。</div>
           </div>
           <div className="scrollx" style={{marginTop:8}}><table className="dt">
@@ -1070,6 +1079,8 @@ function ReelPage({db,setDb,stores,models}){
   const [mode,setMode]=useState("night"); // night=コード入力 / morning=変化チェック
   const [editing,setEditing]=useState(false);
   const [pickMode,setPickMode]=useState(false);
+  // 閉店前コードの編集・削除だけを戻す履歴。翌朝の変化/ガックン/不明は対象外。
+  const [codeUndo,setCodeUndo]=useState([]);
   const reels=db.reels||{};
   const reelHidden=db.reelHidden||{};
   const hidden=new Set(reelHidden[store]||[]);
@@ -1092,6 +1103,19 @@ function ReelPage({db,setDb,stores,models}){
   const cyclePick=(dt,d)=>{ const cur=(reels[K(dt,d)]||{}).pick||null;
     const order={null:"honmei",honmei:"taikou",taikou:null};
     setCell(dt,d,{pick:order[cur]}); };
+  const setNightCode=(dt,d,nextCode)=>{
+    const prevCode=(reels[K(dt,d)]||{}).code||"";
+    const next=(nextCode||"").trim().replace(/[^\d]/g,"").slice(0,3);
+    if(next===prevCode) return;
+    setCodeUndo(h=>[...h,{dt,d,code:prevCode||null}].slice(-30));
+    setCell(dt,d,{code:next||null});
+  };
+  const undoNightCode=()=>{
+    if(!codeUndo.length) return;
+    const u=codeUndo[codeUndo.length-1];
+    setCell(u.dt,u.d,{code:u.code});
+    setCodeUndo(h=>h.slice(0,-1));
+  };
   const cycle=d=>{ const cur=(reels[K(date,d)]||{}).st||null;
     const order={null:"chg",chg:"gak",gak:"unk",unk:null};
     setCell(date,d,{st:order[cur]}); };
@@ -1128,6 +1152,10 @@ function ReelPage({db,setDb,stores,models}){
           <React.Fragment>
             <h2>{date.slice(5)} 閉店前のリールコード</h2>
             <div className="note" style={{marginBottom:8}}>各台をタップして3桁（例: 220）を入力。翌朝はこの数字と見比べます。</div>
+            <div style={{marginBottom:8}}>
+              <button className="btn ghost small" disabled={!codeUndo.length} onClick={undoNightCode}>↶ 直前のコード編集を元に戻す</button>
+              {codeUndo.length>0&&<span className="note" style={{marginLeft:8}}>あと{codeUndo.length}回戻せます</span>}
+            </div>
             <div className="rgrid">{dais.map(d=>{
               const c=(reels[K(date,d)]||{}).code||"";
               const pk=(reels[K(date,d)]||{}).pick||null;
@@ -1136,7 +1164,7 @@ function ReelPage({db,setDb,stores,models}){
                   if(editing){ toggleHidden(d); return; }
                   if(pickMode){ cyclePick(date,d); return; }
                   const v=prompt("台"+d+" のリールコード（3桁 例:220）",c);
-                  if(v!==null) setCell(date,d,{code:v.trim().replace(/[^\d]/g,"").slice(0,3)||null});
+                  if(v!==null) setNightCode(date,d,v);
                 }}>
                   {editing&&<span className="rmx">✕</span>}
                   {pk&&<span className={"pickbadge "+pk}>{pk==="honmei"?"本命":"対抗"}</span>}

@@ -502,7 +502,7 @@ function App(){
     <div>
       <div className="header">
         <h1>台データ<span className="seg">記録</span></h1>
-        <span className="sub">{db.records.length}件 / v19 (除外台を個別復元可能)</span>
+        <span className="sub">{db.records.length}件 / v20 (予測に前日差枚を追加)</span>
       </div>
       {tab==="import"&&<ImportPage stores={stores} models={models} onSave={addRecords} setMsg={setMsg} msg={msg}/>}
       {tab==="list"&&<ListPage db={db} setDb={setDb} stores={stores} models={models}/>}
@@ -734,13 +734,15 @@ function AggPage({db,stores,models}){
   const RULE_METRICS={
     rbP:"前日RB確率の分母(1/x)", bbP:"前日BB確率の分母(1/x)", gouseiD:"前日合成確率の分母(1/x)",
     rb:"前日RB回数", bb:"前日BB回数", start:"前日総回転", maxDama:"前日最大持ち玉",
-    histHot:"過去★実績回数", prevHotNeighbor:"前日★の隣(1=はい)", prevHot:"前日★(1=はい)", tail:"台番号の末尾"
+    histHot:"過去★実績回数", prevHotNeighbor:"前日★の隣(1=はい)", prevHot:"前日★(1=はい)", tail:"台番号の末尾",
+    diff:"前日の差枚(推定・マイナスは負の数)"
   };
   const [customRules,setCustomRules]=useState(()=>{
     try{const x=JSON.parse(localStorage.getItem("slot_targetRules_v1")||"[]");return Array.isArray(x)?x:[];}catch(e){return [];}
   });
   const [ruleEditOpen,setRuleEditOpen]=useState(false);
   const [ruleDraft,setRuleDraft]=useState({metric:"rbP",op:">=",v1:"600",v2:"",score:"1",label:""});
+  const RULE_HINT={diff:"例：前日−500枚以下なら+1点 → 「<=」「-500」。−2000枚以下でさらに+1点なら別ルールで追加。"};
   useEffect(()=>{try{localStorage.setItem("slot_targetRules_v1",JSON.stringify(customRules));}catch(e){}},[customRules]);
   const [th56,setTh56]=useState("250");
   const [minS,setMinS]=useState("2500");
@@ -769,6 +771,7 @@ function AggPage({db,stores,models}){
   const histHot={}; pool.forEach(r=>{ if(isHotR(r)) histHot[r.dai]=(histHot[r.dai]||0)+1; else if(isWarmR(r)) histHot[r.dai]=(histHot[r.dai]||0)+0.5; });
   const hotPrev=new Set(prevRecs.filter(isHotR).map(r=>r.dai));
   const ruleValue=(metric,r)=>{
+    if(metric==="diff") return estDiff(r);
     if(metric==="histHot") return histHot[r.dai]||0;
     if(metric==="prevHotNeighbor") return (hotPrev.has(r.dai-1)||hotPrev.has(r.dai+1))?1:0;
     if(metric==="prevHot") return hotPrev.has(r.dai)?1:0;
@@ -936,6 +939,7 @@ function AggPage({db,stores,models}){
                 </div>
                 <button className="btn" style={{marginTop:10}} onClick={addCustomRule}>この条件を追加</button>
                 <div className="note" style={{marginTop:6}}>確率は「1/x」のxで判定します。例: RB 1/600以上を条件にするなら、項目=前日RB確率の分母、条件=以上、条件値=600。末尾5なら、項目=台番号の末尾、条件=等しい、条件値=5。</div>
+                {ruleDraft.metric==="diff"&&<div className="note" style={{marginTop:4,color:"var(--accent)"}}>差枚はマイナスを負の数で入れます。例：前日−500枚以下で+1点 →「以下」「-500」「1」。−2000枚以下でさらに+1点にしたい場合は、同じ要領でもう1本ルールを追加すれば合計+2点になります。逆にプラスの台を嫌うなら「以上」「0」「-2」のように減点ルールも作れます。</div>}
               </div>}
             </div>
             <div className="note" style={{marginTop:6}}>日付フィルタで基準日を変えられます（過去日の答え合わせ用）。追加条件はこの端末に保存されます。</div>

@@ -154,11 +154,11 @@ const fmt = (v,d=0) => v==null?"–":v.toLocaleString(undefined,{minimumFraction
 /* ---------- parser ---------- */
 const COLMAP = [
   {key:"dai",   re:/台番号|台番/},
-  {key:"start", re:/累計スタート|累計|総回転|総ゲーム|総スタート/},
-  {key:"bb",    re:/BB/i},
-  {key:"rb",    re:/RB/i},
+  {key:"start", re:/累計スタート|累計|総回転|総ゲーム|総スタート|総回数/},
+  {key:"bb",    re:/^BB|BB回数|^BIG(?!確率)|BIG回数/i},
+  {key:"rb",    re:/^RB|RB回数|^REG(?!確率)|REG回数/i},
   {key:"gousei",re:/合成/},
-  {key:"maxDama",re:/最大持/},
+  {key:"maxDama",re:/最大持|最大放出/},
   {key:"prevStart",re:/前日/},
   {key:"dayStart",re:/スタート回数|^スタート/},
 ];
@@ -189,11 +189,30 @@ function parseBookmarkletJSON(obj){
       if(!pageDate) throw "ページから日付を取得できませんでした";
       const dai=obj.dai?parseInt(obj.dai):null;
       if(!dai) throw "台番号を取得できませんでした。ブックマークレットを最新版に更新してください";
+      const rawSeries=(label)=>{
+        if(!obj.raw) return [];
+        const lines=String(obj.raw).split(/\n+/);
+        const i=lines.findIndex(l=>label.test(l.trim()));
+        if(i<0) return [];
+        let buf=lines[i];
+        for(let k=1;k<=6&&i+k<lines.length;k++){
+          if(/^(BONUS|BIG|REG|AT\/ART|BIG確率|合成確率|最終ゲーム|最大放出数|BIG過去最高)/.test(lines[i+k].trim())) break;
+          buf+=" "+lines[i+k];
+        }
+        const nums=buf.match(/1\/\s*[\d.]+|\d+(?:\.\d+)?/g)||[];
+        const out=[];
+        nums.forEach(t=>{ const v=num(t); if(v!=null) out.push(v); });
+        return out;
+      };
+      const gouseiArr=rawSeries(/^合成確率/), maxArr=rawSeries(/^最大放出数/), bonusArr=rawSeries(/^BONUS/);
       const rows=[];
       dayTables.forEach((t,idx)=>{
         const get=re=>{ const r=t.find(r=>re.test((r[0]||"").trim())); return r?num(r[1]):null; };
-        const bb=get(/^BIG$/), rb=get(/^REG$/), bonus=get(/^BONUS$/);
-        const gousei=get(/合成/), maxDama=get(/最大放出|最大持/);
+        const bb=get(/^BIG$/), rb=get(/^REG$/);
+        let bonus=get(/^BONUS$/), gousei=get(/合成/), maxDama=get(/最大放出|最大持/);
+        if(gousei==null&&gouseiArr[idx]!=null) gousei=gouseiArr[idx];
+        if(maxDama==null&&maxArr[idx]!=null) maxDama=maxArr[idx];
+        if(bonus==null&&bonusArr[idx]!=null) bonus=bonusArr[idx];
         if(bb==null&&rb==null&&bonus==null) return;
         rows.push({dai,date:addDays(pageDate,-idx),bb,rb,bonus:(bonus!=null?bonus:((bb||0)+(rb||0))||null),gousei,maxDama,model});
       });
@@ -293,7 +312,7 @@ function parseInput(text){
 }
 
 /* ---------- bookmarklet source ---------- */
-const BM_SRC = `javascript:(function(){function x(e){return(e.innerText||'').trim().replace(/\\s+/g,' ');}var T=[].slice.call(document.querySelectorAll('table')).map(function(t){return [].slice.call(t.rows).map(function(r){return [].slice.call(r.cells).map(x);});}).filter(function(r){return r.length>1;});var has=T.some(function(t){return t.length>2&&t.some(function(r){return r.some(function(c){return /^\\d{2,4}$/.test(c);});});});if(!has){var f=[].slice.call(document.querySelectorAll('iframe')).map(function(i){return i.src;}).filter(function(s){return s&&s.indexOf('http')===0&&s.indexOf('dmm.com')<0;});if(f.length){if(confirm('台データの表が見つかりません。埋め込みデータページへ移動しますか？（移動後にもう一度実行してください）')){location.href=f[0];}return;}alert('台データの表が見つかりません。リスト表示/DATA表示のページでお試しください');return;}var d=(document.body.innerText.match(/\\d{4}[-\\/]\\d{2}[-\\/]\\d{2}/)||[''])[0].replace(/\\//g,'-');var dn=(document.body.innerText.match(/台番号\\s*([0-9]{2,4})/)||['',''])[1];var s=JSON.stringify({date:d,dai:dn,url:location.href,title:document.title,tables:T});function fb(){var a=document.createElement('textarea');a.value=s;a.style.cssText='position:fixed;top:8%;left:4%;width:92%;height:55%;z-index:999999;background:white;color:black;border:3px solid rgb(255,138,42);border-radius:8px;padding:8px;font-size:11px';document.body.appendChild(a);a.focus();a.select();alert('全選択済みです。コピーして記録アプリに貼り付けてください');}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(function(){alert('台データをコピーしました。記録アプリに貼り付けてください');},fb);}else{fb();}})();`;
+const BM_SRC = `javascript:(function(){function x(e){return(e.innerText||'').trim().replace(/\\s+/g,' ');}var T=[].slice.call(document.querySelectorAll('table')).map(function(t){return [].slice.call(t.rows).map(function(r){return [].slice.call(r.cells).map(x);});}).filter(function(r){return r.length>1;});var has=T.some(function(t){return t.length>2&&t.some(function(r){return r.some(function(c){return /^\\d{2,4}$/.test(c);});});});if(!has){var f=[].slice.call(document.querySelectorAll('iframe')).map(function(i){return i.src;}).filter(function(s){return s&&s.indexOf('http')===0&&s.indexOf('dmm.com')<0;});if(f.length){if(confirm('台データの表が見つかりません。埋め込みデータページへ移動しますか？（移動後にもう一度実行してください）')){location.href=f[0];}return;}alert('台データの表が見つかりません。リスト表示/DATA表示のページでお試しください');return;}var d=(document.body.innerText.match(/\\d{4}[-\\/]\\d{2}[-\\/]\\d{2}/)||[''])[0].replace(/\\//g,'-');var dn=(document.body.innerText.match(/台番号\\s*([0-9]{2,4})/)||['',''])[1];var RT=(document.body.innerText||'').slice(0,12000);var s=JSON.stringify({date:d,dai:dn,url:location.href,title:document.title,tables:T,raw:RT});function fb(){var a=document.createElement('textarea');a.value=s;a.style.cssText='position:fixed;top:8%;left:4%;width:92%;height:55%;z-index:999999;background:white;color:black;border:3px solid rgb(255,138,42);border-radius:8px;padding:8px;font-size:11px';document.body.appendChild(a);a.focus();a.select();alert('全選択済みです。コピーして記録アプリに貼り付けてください');}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(function(){alert('台データをコピーしました。記録アプリに貼り付けてください');},fb);}else{fb();}})();`;
 
 /* ---------- 差枚推定 (マイジャグV 設定1ベース) ---------- */
 const COIN={ budou:5.98, replay:7.3, cherry:38.1, pBudou:8, pCherry:2, bb:240, rb:96 };
@@ -502,7 +521,7 @@ function App(){
     <div>
       <div className="header">
         <h1>台データ<span className="seg">記録</span></h1>
-        <span className="sub">{db.records.length}件 / v20 (予測に前日差枚を追加)</span>
+        <span className="sub">{db.records.length}件 / v22 (PsCUBE合成確率の補完)</span>
       </div>
       {tab==="import"&&<ImportPage stores={stores} models={models} onSave={addRecords} setMsg={setMsg} msg={msg}/>}
       {tab==="list"&&<ListPage db={db} setDb={setDb} stores={stores} models={models}/>}

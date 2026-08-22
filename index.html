@@ -189,30 +189,40 @@ function parseBookmarkletJSON(obj){
       if(!pageDate) throw "ページから日付を取得できませんでした";
       const dai=obj.dai?parseInt(obj.dai):null;
       if(!dai) throw "台番号を取得できませんでした。ブックマークレットを最新版に更新してください";
-      const rawSeries=(label)=>{
-        if(!obj.raw) return [];
-        const lines=String(obj.raw).split(/\n+/);
-        const i=lines.findIndex(l=>label.test(l.trim()));
-        if(i<0) return [];
-        let buf=lines[i];
-        for(let k=1;k<=6&&i+k<lines.length;k++){
-          if(/^(BONUS|BIG|REG|AT\/ART|BIG確率|合成確率|最終ゲーム|最大放出数|BIG過去最高)/.test(lines[i+k].trim())) break;
-          buf+=" "+lines[i+k];
-        }
-        const nums=buf.match(/1\/\s*[\d.]+|\d+(?:\.\d+)?/g)||[];
-        const out=[];
-        nums.forEach(t=>{ const v=num(t); if(v!=null) out.push(v); });
+      // ページ全文を「本日/N日前」ブロックに分割して値を取得
+      const rawByDay=(()=>{
+        const out={};
+        if(!obj.raw) return out;
+        const lines=String(obj.raw).split(/\n+/).map(x=>x.trim()).filter(Boolean);
+        const marks=[];
+        lines.forEach((l,i)=>{ const m=l.match(/^(本日|(\d+)日前)$/); if(m) marks.push({i,off:m[2]?parseInt(m[2]):0}); });
+        marks.forEach((b,k)=>{
+          const end=(k+1<marks.length)?marks[k+1].i:lines.length;
+          const vals=lines.slice(b.i+1,end).filter(v=>/^[\d.\/]+$/.test(v));
+          if(!vals.length) return;
+          // 並び: BONUS, BIG, REG, AT/ART, BIG確率, 合成確率, 最終ゲーム, 最大放出数, BIG過去最高
+          // 確率欄が空の日があるため「1/」を含む値の位置で判定
+          const probIdx=[]; vals.forEach((v,i)=>{ if(v.indexOf('/')>=0) probIdx.push(i); });
+          const rec={bonus:num(vals[0]),bb:num(vals[1]),rb:num(vals[2])};
+          if(probIdx.length>=2){
+            rec.gousei=num(vals[probIdx[1]]);
+            const after=vals.slice(probIdx[1]+1);
+            if(after.length>=2) rec.maxDama=num(after[1]);
+          }
+          out[b.off]=rec;
+        });
         return out;
-      };
-      const gouseiArr=rawSeries(/^合成確率/), maxArr=rawSeries(/^最大放出数/), bonusArr=rawSeries(/^BONUS/);
+      })();
+
       const rows=[];
       dayTables.forEach((t,idx)=>{
         const get=re=>{ const r=t.find(r=>re.test((r[0]||"").trim())); return r?num(r[1]):null; };
         const bb=get(/^BIG$/), rb=get(/^REG$/);
         let bonus=get(/^BONUS$/), gousei=get(/合成/), maxDama=get(/最大放出|最大持/);
-        if(gousei==null&&gouseiArr[idx]!=null) gousei=gouseiArr[idx];
-        if(maxDama==null&&maxArr[idx]!=null) maxDama=maxArr[idx];
-        if(bonus==null&&bonusArr[idx]!=null) bonus=bonusArr[idx];
+        const rd=rawByDay[idx]||{};
+        if(gousei==null&&rd.gousei!=null) gousei=rd.gousei;
+        if(maxDama==null&&rd.maxDama!=null) maxDama=rd.maxDama;
+        if(bonus==null&&rd.bonus!=null) bonus=rd.bonus;
         if(bb==null&&rb==null&&bonus==null) return;
         rows.push({dai,date:addDays(pageDate,-idx),bb,rb,bonus:(bonus!=null?bonus:((bb||0)+(rb||0))||null),gousei,maxDama,model});
       });
@@ -521,7 +531,7 @@ function App(){
     <div>
       <div className="header">
         <h1>台データ<span className="seg">記録</span></h1>
-        <span className="sub">{db.records.length}件 / v22 (PsCUBE合成確率の補完)</span>
+        <span className="sub">{db.records.length}件 / v23 (PsCUBE取込を全面修正)</span>
       </div>
       {tab==="import"&&<ImportPage stores={stores} models={models} onSave={addRecords} setMsg={setMsg} msg={msg}/>}
       {tab==="list"&&<ListPage db={db} setDb={setDb} stores={stores} models={models}/>}

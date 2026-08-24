@@ -284,6 +284,26 @@ function parseBookmarkletJSON(obj){
   }
 
   // --- DATA ONLINE style ---
+  // rawテキストにタブ区切りの表がある場合はそちらを優先(ページ自動更新でtablesが古くなることがあるため)
+  const rawRows=(()=>{
+    if(!obj.raw) return null;
+    const lines=String(obj.raw).split(/\n+/);
+    const hi=lines.findIndex(l=>/台番号/.test(l)&&l.indexOf("\t")>=0);
+    if(hi<0) return null;
+    const keys=mapHeader(lines[hi].split("\t").map(x=>x.trim()));
+    if(!keys.includes("dai")) return null;
+    const out=[];
+    for(let i=hi+1;i<lines.length;i++){
+      const cells=lines[i].split("\t").map(x=>x.trim());
+      if(cells.length<3) break;
+      const rec={};
+      keys.forEach((k,j)=>{ if(k) rec[k]=num(cells[j]); });
+      if(rec.dai!=null) out.push(rec);
+    }
+    return out.length?out:null;
+  })();
+  if(rawRows) return {rows:rawRows,date:pageDate,model,url:obj.url||null,fmt:"dataonline-raw"};
+
   let best=null,bestScore=-1;
   for(const t of tables){
     let hIdx=t.findIndex(r=>r.some(c=>/台番/.test(c)));
@@ -531,7 +551,7 @@ function App(){
     <div>
       <div className="header">
         <h1>台データ<span className="seg">記録</span></h1>
-        <span className="sub">{db.records.length}件 / v23 (PsCUBE取込を全面修正)</span>
+        <span className="sub">{db.records.length}件 / v25 (日付タイプ別・高回転台を追加)</span>
       </div>
       {tab==="import"&&<ImportPage stores={stores} models={models} onSave={addRecords} setMsg={setMsg} msg={msg}/>}
       {tab==="list"&&<ListPage db={db} setDb={setDb} stores={stores} models={models}/>}
@@ -758,7 +778,8 @@ function DaiPage({db,setDb,stores,models}){
 /* ---------- aggregate ---------- */
 function AggPage({db,stores,models}){
   const [f,setF]=useState({store:"",model:"",date:""});
-  const [openSec,setOpenSec]=useState({daily:false,cand:false,calendar:false,predict:false,tail:false});
+  const [openSec,setOpenSec]=useState({daily:false,cand:false,calendar:false,predict:false,tail:false,dtype:false,spin:false});
+  const [spinTh,setSpinTh]=useState("8000");
   const toggleSec=k=>setOpenSec(o=>({...o,[k]:!o[k]}));
   const RULE_METRICS={
     rbP:"前日RB確率の分母(1/x)", bbP:"前日BB確率の分母(1/x)", gouseiD:"前日合成確率の分母(1/x)",
@@ -855,6 +876,36 @@ function AggPage({db,stores,models}){
     const S=rs.reduce((a,r)=>a+(r.start||0),0), T=rs.reduce((a,r)=>a+(r.total||0),0);
     return {t,n:rs.length,g:S&&T?S/T:null,avgT:rs.length?T/rs.length:null};
   });
+
+  // --- 日付タイプ別の傾向 ---
+  const dayType=(d)=>{
+    const dd=parseInt(d.slice(8,10));
+    if(dd===21) return "21日(確定)";
+    if(dd%10===5) return "5の日";
+    if(dd%10===7) return "7の日";
+    if(dd%10===1) return "1の日";
+    return "その他";
+  };
+  const dtypeRows=(()=>{
+    const g={};
+    pool.forEach(r=>{ const k=dayType(r.date); (g[k]=g[k]||[]).push(r); });
+    const order=["21日(確定)","5の日","7の日","1の日","その他"];
+    return order.filter(k=>g[k]).map(k=>{
+      const rs=g[k];
+      const days=new Set(rs.map(r=>r.date)).size;
+      const S=rs.reduce((a,r)=>a+(r.start||0),0);
+      const R=rs.reduce((a,r)=>a+(r.rb||0),0);
+      const T=rs.reduce((a,r)=>a+(r.total||0),0);
+      const hot=rs.filter(r=>isHotR(r)).length;
+      const diffs=rs.map(r=>estDiff(r)).filter(v=>v!=null);
+      const avgDiff=diffs.length?diffs.reduce((a,b)=>a+b,0)/diffs.length:null;
+      return {k,days,n:rs.length,rbG:(S&&R)?S/R:null,g:(S&&T)?S/T:null,hot,hotRate:rs.length?hot/rs.length*100:0,avgDiff};
+    });
+  })();
+  // --- よく回された台(高回転) ---
+  const spinV=parseFloat(spinTh)||0;
+  const spinRows=pool.filter(r=>(r.start||0)>=spinV)
+    .sort((a,b)=>(b.start||0)-(a.start||0)).slice(0,40);
   const allS=pool.reduce((a,r)=>a+(r.start||0),0), allB=pool.reduce((a,r)=>a+(r.bb||0),0), allR=pool.reduce((a,r)=>a+(r.rb||0),0), allT=pool.reduce((a,r)=>a+(r.total||0),0);
   return (
     <div className="page">
@@ -974,6 +1025,50 @@ function AggPage({db,stores,models}){
             <div className="note" style={{marginTop:6}}>日付フィルタで基準日を変えられます（過去日の答え合わせ用）。追加条件はこの端末に保存されます。</div>
           </React.Fragment>
         )}
+        </div>}
+      </div>
+      <div className="card">
+        <button className="sectionToggle" onClick={()=>toggleSec("dtype")}><span>日付タイプ別の傾向</span><span className="arr">{openSec.dtype?"▲ 閉じる":"▼ 開く"}</span></button>
+        {openSec.dtype&&<div style={{marginTop:10}}>
+        <div className="scrollx"><table className="dt">
+          <thead><tr><th style={{textAlign:"left"}}>日タイプ</th><th>日数</th><th>台日数</th><th>★率</th><th>バケ確率</th><th>合成</th><th>平均差枚</th></tr></thead>
+          <tbody>{dtypeRows.map((d,i)=>(
+            <tr key={i} className={d.hotRate>=8?"hot":""}>
+              <td style={{textAlign:"left",fontFamily:"inherit"}}>{d.k}</td>
+              <td>{d.days}</td><td>{d.n}</td>
+              <td style={{color:d.hotRate>=8?"var(--good)":undefined,fontWeight:d.hotRate>=8?700:400}}>{fmt(d.hotRate,1)}%</td>
+              <td>{d.rbG?"1/"+fmt(d.rbG,1):"–"}</td>
+              <td>{d.g?"1/"+fmt(d.g,1):"–"}</td>
+              <td style={{color:d.avgDiff==null?undefined:(d.avgDiff>=0?"var(--good)":"var(--bad)")}}>{d.avgDiff==null?"–":(d.avgDiff>0?"+":"")+fmt(d.avgDiff)}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+        <div className="note" style={{marginTop:6}}>日付の下1桁で自動分類（21日は最優先）。★率＝その日タイプの台のうち★が付いた割合。メール告知だけの日と実際に入っている日を見分ける材料になります。</div>
+        </div>}
+      </div>
+      <div className="card">
+        <button className="sectionToggle" onClick={()=>toggleSec("spin")}><span>よく回された台（高回転）</span><span className="arr">{openSec.spin?"▲ 閉じる":"▼ 開く"}</span></button>
+        {openSec.spin&&<div style={{marginTop:10}}>
+        <label className="fl">回転数のしきい値（これ以上を表示）</label>
+        <input type="text" inputMode="numeric" value={spinTh} onChange={e=>setSpinTh(e.target.value)}/>
+        <div className="scrollx" style={{marginTop:8}}><table className="dt">
+          <thead><tr><th>台番号</th><th>日付</th><th>回転数</th><th>BB</th><th>RB</th><th>バケ確率</th><th>差枚</th></tr></thead>
+          <tbody>{spinRows.map((r,i)=>{
+            const hot=isHotR(r), d=estDiff(r);
+            return (
+            <tr key={i} className={hot?"hot":""}>
+              <td><span className="daichip">{r.dai}</span>{hot&&<span className="star56">★</span>}</td>
+              <td className="mut">{r.date.slice(5)}</td>
+              <td style={{fontWeight:700}}>{r.startEst&&<span className="mut">≈</span>}{fmt(r.start)}</td>
+              <td style={{color:"var(--bb)"}}>{fmt(r.bb)}</td>
+              <td style={{color:"var(--rb)"}}>{fmt(r.rb)}</td>
+              <td style={{color:r.rbP&&r.rbP<=250.5?"var(--good)":undefined,fontWeight:r.rbP&&r.rbP<=250.5?700:400}}>{r.rbP?"1/"+fmt(r.rbP,1):"–"}</td>
+              <td style={{color:d==null?undefined:(d>=0?"var(--good)":"var(--bad)")}}>{d==null?"–":(d>0?"+":"")+fmt(d)}</td>
+            </tr>);
+          })}</tbody>
+        </table></div>
+        {!spinRows.length&&<div className="note">該当する台がありません。しきい値を下げてください。</div>}
+        <div className="note" style={{marginTop:6}}>朝から回され続けた台＝打ち手が高設定と判断した台、という読み方ができます（ベルシティ等、稼働の高い店で有効）。上位40件まで表示。</div>
         </div>}
       </div>
       <div className="card">

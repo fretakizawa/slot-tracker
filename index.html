@@ -283,6 +283,56 @@ function parseBookmarkletJSON(obj){
     if(rows.length) return {rows,date:pageDate,model,url:obj.url||null,fmt:"pscube"};
   }
 
+  // --- Athink (ウエスタン等) ---
+  {
+    const rawTxt=String(obj.raw||"");
+    const isAthink=(obj.url&&/athink\.jp/.test(obj.url))||/Athink/i.test(rawTxt);
+    if(isAthink){
+      // 日付: raw の「本日8/25(火)」等から取得
+      let aDate=pageDate;
+      if(!aDate){
+        const md=rawTxt.match(/本日\s*(\d{1,2})\/(\d{1,2})/);
+        if(md){ const y=new Date().getFullYear(); aDate=y+"-"+String(md[1]).padStart(2,"0")+"-"+String(md[2]).padStart(2,"0"); }
+      }
+      if(!aDate) aDate=ymdLocal(new Date());
+      // ① 台別詳細ページ(LED表示。背景の8とパディングを除去)
+      const lines=rawTxt.split(/\n/).map(x=>x.trim());
+      const mDai=rawTxt.match(/(\d{2,4})\s*番台/);
+      if(mDai&&lines.some(l=>l==="ゲーム数")){
+        const strip8=v=>{ if(v==null) return null; const t=String(v).trim(); if(/^8+$/.test(t)) return null; const r=t.replace(/^8+/,""); return r===""?null:parseFloat(r); };
+        const pick=(label)=>{ const i=lines.findIndex(l=>l===label); return i<0?null:lines[i+2]; };
+        const prob=(label)=>{ const v=pick(label); if(!v) return null; const p=String(v).split("/")[1]; return strip8(p); };
+        const bb=strip8(pick("BB")), rb=strip8(pick("RB"));
+        const gousei=prob("合成確率"), maxDama=strip8(pick("最大持玉"));
+        let start=strip8(lines.findIndex(l=>/^累計/.test(l))>=0?lines[lines.findIndex(l=>/^累計/.test(l))+2]:null);
+        const tot=(bb||0)+(rb||0);
+        if(start==null&&gousei&&tot>0) start=Math.round(gousei*tot);
+        if(bb!=null||rb!=null){
+          return {rows:[{dai:parseInt(mDai[1]),date:aDate,bb,rb,bonus:tot||null,gousei,maxDama,start,model}],
+                  date:aDate,model,url:obj.url||null,fmt:"athink-detail"};
+        }
+      }
+      // ② 一覧ページ(台番号/大当り回数/大当り確率/スタート)
+      for(const t of tables){
+        const hi=t.findIndex(r=>r.some(c=>/台番号/.test(c))&&r.some(c=>/大当り回数/.test(c)));
+        if(hi<0) continue;
+        const head=t[hi];
+        const ci=re=>head.findIndex(c=>re.test(c));
+        const iD=ci(/台番号/), iC=ci(/大当り回数/), iP=ci(/大当り確率/), iS=ci(/スタート/);
+        const rows=[];
+        for(let i=hi+1;i<t.length;i++){
+          const c=t[i]; const dai=num(c[iD]); if(dai==null) continue;
+          const bonus=iC>=0?num(c[iC]):null;
+          const gousei=iP>=0?num(c[iP]):null;
+          const dayStart=iS>=0?num(c[iS]):null;
+          const start=(bonus&&gousei)?Math.round(bonus*gousei):null;
+          rows.push({dai,date:aDate,bonus,gousei,dayStart,start,model});
+        }
+        if(rows.length) return {rows,date:aDate,model,url:obj.url||null,fmt:"athink-list"};
+      }
+    }
+  }
+
   // --- DATA ONLINE style ---
   // rawテキストにタブ区切りの表がある場合はそちらを優先(ページ自動更新でtablesが古くなることがあるため)
   const rawRows=(()=>{
@@ -551,7 +601,7 @@ function App(){
     <div>
       <div className="header">
         <h1>台データ<span className="seg">記録</span></h1>
-        <span className="sub">{db.records.length}件 / v25 (日付タイプ別・高回転台を追加)</span>
+        <span className="sub">{db.records.length}件 / v26 (ウエスタン/Athink取込に対応)</span>
       </div>
       {tab==="import"&&<ImportPage stores={stores} models={models} onSave={addRecords} setMsg={setMsg} msg={msg}/>}
       {tab==="list"&&<ListPage db={db} setDb={setDb} stores={stores} models={models}/>}
